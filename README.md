@@ -1,6 +1,4 @@
-Vibe
-
-An AI App builder similar to Lovable.den & Bolt.new. Build with Inngest AI agent tool kit, Nextjs 15, Clerk, Shandcn, TRPC, Prisma & Neondb.
+Lovable Clone. Build with Inngest AI agent tool kit, Nextjs 15, Clerk, Shandcn, TRPC, Prisma & Neondb.
 
 Check it Out: https://lovable-clone-five.vercel.app/
 
