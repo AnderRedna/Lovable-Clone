@@ -1,3 +1,10 @@
+Vibe
+
+An AI App builder similar to Lovable.den & Bolt.new. Build with Inngest AI agent tool kit, Nextjs 15, Clerk, Shandcn, TRPC, Prisma & Neondb.
+
+Check it Out: https://lovable-clone-five.vercel.app/
+
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
@@ -13,14 +20,6 @@ Open [http://localhost:3008](http://localhost:3008) with your browser to see the
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Publish your e2b template
-
-```bash
-e2b template build --name template-name --cmd "/compile_page.sh"
-```
-
-name must be unique
 
 ## Deploy on Vercel
 
