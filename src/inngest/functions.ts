@@ -30,15 +30,34 @@ export const codeAgentFunction = inngest.createFunction(
   { id: "code-agent" },
   { event: "code-agent/run" },
   async ({ event, step }) => {
+    console.log("Starting code-agent function", event.data);
     const sandboxId = await step.run("get-sandbox-id", async () => {
-      const sandbox = await Sandbox.create("lovable-clone-nextjs-sg-0206");
-      await sandbox.setTimeout(SANDBOX_TIMEOUT_IN_MS);
-      return sandbox.sandboxId;
+      console.log("Running get-sandbox-id");
+      const template =
+        process.env.E2B_TEMPLATE_ID ||
+        process.env.E2B_TEMPLATE_NAME ||
+        "lovable-clone-nextjs-sg-0206"; // fallback to demo template
+      console.log("Creating E2B sandbox using template:", template);
+      try {
+        const sandbox = await Sandbox.create(template);
+        await sandbox.setTimeout(SANDBOX_TIMEOUT_IN_MS);
+        console.log("Completed get-sandbox-id", sandbox.sandboxId);
+        return sandbox.sandboxId;
+      } catch (err: any) {
+        console.error(
+          "Failed to create E2B sandbox. Check E2B_API_KEY access and template ownership.",
+          {
+            message: err?.message,
+          }
+        );
+        throw err;
+      }
     });
 
     const previousMessages = await step.run(
       "get-previous-messages",
       async () => {
+        console.log("Running get-previous-messages");
         const formattedMessages: Message[] = [];
 
         const messages = await prisma.message.findMany({
@@ -58,7 +77,7 @@ export const codeAgentFunction = inngest.createFunction(
             content: message.content,
           });
         }
-
+        console.log("Completed get-previous-messages", formattedMessages.length, "messages");
         return formattedMessages.reverse();
       }
     );
@@ -92,6 +111,7 @@ export const codeAgentFunction = inngest.createFunction(
             command: z.string(),
           }),
           handler: async ({ command }, { step }) => {
+            console.log("Running terminal tool", command);
             return await step?.run("terminal", async () => {
               const buffers = {
                 stdout: "",
@@ -108,7 +128,7 @@ export const codeAgentFunction = inngest.createFunction(
                     buffers.stderr += data;
                   },
                 });
-
+                console.log("Completed terminal tool", result.exitCode);
                 return result.stdout;
               } catch (error) {
                 console.error(
@@ -134,6 +154,7 @@ export const codeAgentFunction = inngest.createFunction(
             { files },
             { step, network }: Tool.Options<AgentState>
           ) => {
+            console.log("Running createOrUpdateFiles tool", files.length, "files");
             const newFiles = await step?.run(
               "createOrUpdateFiles",
               async () => {
@@ -145,9 +166,10 @@ export const codeAgentFunction = inngest.createFunction(
                     await sandbox.files.write(file.path, file.content);
                     updatedFiles[file.path] = file.content;
                   }
-
+                  console.log("Completed createOrUpdateFiles tool");
                   return updatedFiles;
                 } catch (error) {
+                  console.log("Error in createOrUpdateFiles", error);
                   return "Error: " + error;
                 }
               }
@@ -165,6 +187,7 @@ export const codeAgentFunction = inngest.createFunction(
             files: z.array(z.string()),
           }),
           handler: async ({ files }, { step }) => {
+            console.log("Running readFiles tool", files.length, "files");
             return await step?.run("readFiles", async () => {
               try {
                 const sandbox = await getSandbox(sandboxId);
@@ -174,9 +197,10 @@ export const codeAgentFunction = inngest.createFunction(
                   const content = await sandbox.files.read(file);
                   contents.push({ path: file, content });
                 }
-
+                console.log("Completed readFiles tool", contents.length, "files read");
                 return JSON.stringify(contents);
               } catch (error) {
+                console.log("Error in readFiles", error);
                 return "Error: " + error;
               }
             });
@@ -185,6 +209,7 @@ export const codeAgentFunction = inngest.createFunction(
       ],
       lifecycle: {
         onResponse: async ({ result, network }) => {
+          console.log("Running onResponse lifecycle");
           const lastAssistantTextMessageText =
             lastAssistantTextMessageContent(result);
 
@@ -193,7 +218,7 @@ export const codeAgentFunction = inngest.createFunction(
               network.state.data.summary = lastAssistantTextMessageText;
             }
           }
-
+          console.log("Completed onResponse lifecycle");
           return result;
         },
       },
@@ -205,17 +230,20 @@ export const codeAgentFunction = inngest.createFunction(
       maxIter: 15,
       defaultState: state,
       router: async ({ network }) => {
+        console.log("Running router");
         const summary = network.state.data.summary;
 
         if (summary) {
+          console.log("Router: summary exists, ending");
           return;
         }
-
+        console.log("Router: no summary, routing to codeAgent");
         return codeAgent;
       },
     });
 
     const result = await network.run(event.data.value, { state });
+    console.log("Completed network.run", result.state.data.summary ? "success" : "error");
 
     const fragmentTitleGenerator = createAgent({
       name: "fragment-title-generator",
@@ -244,24 +272,29 @@ export const codeAgentFunction = inngest.createFunction(
     const { output: fragmentTitleOutput } = await fragmentTitleGenerator.run(
       result.state.data.summary
     );
+    console.log("Completed fragmentTitleGenerator.run");
 
     const { output: responseOutput } = await responseGenerator.run(
       result.state.data.summary
     );
+    console.log("Completed responseGenerator.run");
 
     const isError =
       !result.state.data.summary ||
       Object.keys(result.state.data.files || {}).length === 0;
 
     const sandboxUrl = await step.run("get-sandbox-url", async () => {
+      console.log("Running get-sandbox-url");
       const sandbox = await getSandbox(sandboxId);
       const host = sandbox.getHost(3000);
+      console.log("Completed get-sandbox-url", host);
       return `https://${host}`;
     });
 
     await step.run("save-result", async () => {
+      console.log("Running save-result");
       if (isError) {
-        return await prisma.message.create({
+        const errorMessage = await prisma.message.create({
           data: {
             projectId: event.data.projectId,
             content: "Something went wrong. Please try again.",
@@ -269,9 +302,11 @@ export const codeAgentFunction = inngest.createFunction(
             type: "ERROR",
           },
         });
+        console.log("Completed save-result with error", errorMessage.id);
+        return errorMessage;
       }
 
-      return await prisma.message.create({
+      const successMessage = await prisma.message.create({
         data: {
           projectId: event.data.projectId,
           content: parseAgentOutput(responseOutput),
@@ -286,8 +321,10 @@ export const codeAgentFunction = inngest.createFunction(
           },
         },
       });
+      console.log("Completed save-result with success", successMessage.id);
+      return successMessage;
     });
-
+    console.log("Completed code-agent function");
     return {
       url: sandboxUrl,
       title: "Fragment",

@@ -1,0 +1,18 @@
+# E2B sandbox template config for this repo.
+# Build this template with your E2B API key for YOUR team to avoid 403 errors.
+# Tip:
+# - Do NOT set template_id here when building a brand new template; the CLI will create one for your team.
+# - Optionally set a unique template_name to find it easily in the dashboard.
+# - Use the E2B API key that belongs to the same team you want to use.
+
+# After building, copy the resulting Template ID into your .env as E2B_TEMPLATE_ID
+# and restart your Next.js + Inngest Dev Server.
+
+# If you want to hard-bind to a specific team, you can set team_id below, but it's
+# recommended to omit it and let the CLI use the team of your API key.
+# team_id = "4cbf2aa9-99af-46e6-bdfd-c03d02e3daff"
+
+start_cmd = "/compile_page.sh"
+dockerfile = "e2b.Dockerfile"
+
+template_name = "lovable-clone-nextjs-local"

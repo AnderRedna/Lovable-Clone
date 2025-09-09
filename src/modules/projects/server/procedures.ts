@@ -15,6 +15,7 @@ export const projectsRouter = createTRPCRouter({
       })
     )
     .query(async ({ input, ctx }) => {
+      console.log("Starting projects.getOne", input);
       const existingProject = await prisma.project.findUnique({
         where: {
           id: input.id,
@@ -28,10 +29,11 @@ export const projectsRouter = createTRPCRouter({
           message: "Project not found",
         });
       }
-
+      console.log("Completed projects.getOne", existingProject.id);
       return existingProject;
     }),
   getMany: protectedProcedure.query(async ({ ctx }) => {
+    console.log("Starting projects.getMany");
     const projects = await prisma.project.findMany({
       where: {
         userId: ctx.auth.userId,
@@ -40,7 +42,7 @@ export const projectsRouter = createTRPCRouter({
         updatedAt: "desc",
       },
     });
-
+    console.log("Completed projects.getMany", projects.length, "projects");
     return projects;
   }),
   create: protectedProcedure
@@ -53,8 +55,13 @@ export const projectsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      console.log("Starting projects.create", input);
       try {
-        await consumeCredits();
+        if (process.env.DISABLE_CREDIT_CHECK !== 'true') {
+          await consumeCredits();
+        } else {
+          console.log("Credit check disabled, skipping consumeCredits");
+        }
       } catch (error) {
         if (error instanceof Error) {
           throw new TRPCError({
@@ -83,14 +90,15 @@ export const projectsRouter = createTRPCRouter({
         },
       });
 
-      await inngest.send({
+  const sendResult = await inngest.send({
         name: "code-agent/run",
         data: {
           value: input.value,
           projectId: createdProject.id,
         },
       });
-
+  console.log("Inngest event sent (projects.create)", sendResult);
+  console.log("Completed projects.create", createdProject.id);
       return createdProject;
     }),
 });
