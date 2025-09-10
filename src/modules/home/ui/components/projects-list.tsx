@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useQuery } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -70,6 +71,7 @@ const ProjectsList = () => {
                   <p className="text-sm text-muted-foreground">
                     {formatDistanceToNow(project.updatedAt, {
                       addSuffix: true,
+                      locale: ptBR,
                     })}
                   </p>
                 </div>
