@@ -1,101 +1,81 @@
-import { CopyCheckIcon, CopyIcon, DownloadIcon } from "lucide-react";
-import { Fragment, useCallback, useMemo, useState } from "react";
-import { toast } from "sonner";
+import { NextRequest, NextResponse } from 'next/server';
+import JSZip from 'jszip';
+import prisma from '@/lib/prisma';
+import { Fragment } from '@/generated/prisma';
 
-import { MAX_SEGMENTS } from "@/constants";
-import { convertFilesToTreeItems } from "@/lib/utils";
-import { FileCollection } from "@/types";
-import { CodeView } from "./code-view";
-import { Hint } from "./hint";
-import { TreeView } from "./tree-view";
-import {
-  Breadcrumb,
-  BreadcrumbEllipsis,
-  BreadcrumbItem,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "./ui/breadcrumb";
-import { Button } from "./ui/button";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "./ui/resizable";
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
+  const { projectId } = await params;
 
-function getLanguageFromExtension(filename: string): string {
-  const extension = filename.split(".")?.pop()?.toLowerCase();
-  return extension || "text";
-}
+  try {
+    // Fetch all fragments for the project
+    const fragments = await prisma.fragment.findMany({
+      where: {
+        message: {
+          projectId: projectId,
+        },
+      },
+      include: {
+        message: true,
+      },
+    });
 
-interface FileBreadcrumbProps {
-  filePath: string;
-}
-
-const FileBreadcrumb = ({ filePath }: FileBreadcrumbProps) => {
-  const pathSegments = filePath.split("/");
-
-  const renderBreadcrumItems = () => {
-    if (pathSegments.length <= MAX_SEGMENTS) {
-      // show all segments if 4 or less
-      return pathSegments.map((segment, index) => {
-        const isLast = index === pathSegments.length - 1;
-
-        return (
-          <Fragment key={index}>
-            <BreadcrumbItem>
-              {isLast ? (
-                <BreadcrumbPage className="font-medium">
-                  {segment}
-                </BreadcrumbPage>
-              ) : (
-                <span className="text-muted-foreground">{segment}</span>
-              )}
-            </BreadcrumbItem>
-            {!isLast && <BreadcrumbSeparator />}
-          </Fragment>
-        );
-      });
-    } else {
-      const firstSegment = pathSegments[0];
-      const lastSegment = pathSegments[pathSegments.length - 1];
-
-      return (
-        <>
-          <BreadcrumbItem>
-            <span className="text-muted-foreground">{firstSegment}</span>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbEllipsis />
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbPage className="font-medium">
-                {lastSegment}
-              </BreadcrumbPage>
-            </BreadcrumbItem>
-          </BreadcrumbItem>
-        </>
-      );
+    if (fragments.length === 0) {
+      return NextResponse.json({ error: 'No files found for this project' }, { status: 404 });
     }
-  };
 
-  return (
-    <Breadcrumb>
-      <BreadcrumbList>{renderBreadcrumItems()}</BreadcrumbList>
-    </Breadcrumb>
-  );
-};
+    const zip = new JSZip();
 
-interface FileExplorerProps {
-  files: FileCollection;
-  projectId: string;
-}
+    // Collect all generated files content to detect dependencies
+    let allFilesContent = '';
+    fragments.forEach((fragment: Fragment) => {
+      const files = fragment.files as Record<string, string>;
+      allFilesContent += Object.values(files).join('\n');
+    });
 
-const FileExplorer = ({ files, projectId }: FileExplorerProps) => {
-  // Default project files that are always included
-  const defaultFiles: FileCollection = {
-    'package.json': JSON.stringify({
+    // Detect dependencies based on imports
+    const detectedDeps = new Set<string>();
+    const importRegex = /import\s+.*?\s+from\s+['"]([^'"]+)['"]/g;
+    let match;
+    while ((match = importRegex.exec(allFilesContent)) !== null) {
+      const packageName = match[1];
+      // Skip relative imports and built-ins
+      if (!packageName.startsWith('.') && !packageName.startsWith('@/') && !['react', 'next'].includes(packageName)) {
+        detectedDeps.add(packageName);
+      }
+    }
+
+    // Base dependencies
+    const baseDeps: Record<string, string> = {
+      "next": "14.0.0",
+      "react": "^18",
+      "react-dom": "^18",
+      "clsx": "^2.1.1",
+      "tailwind-merge": "^2.3.0",
+      "class-variance-authority": "^0.7.1",
+      "radix-ui": "^1.4.2"
+    };
+
+    // Add detected dependencies
+    const allDeps: Record<string, string> = { ...baseDeps };
+    detectedDeps.forEach(dep => {
+      // Map common packages to versions
+      const versionMap: Record<string, string> = {
+        'lucide-react': '^0.469.0',
+        // Add more mappings as needed
+      };
+      if (versionMap[dep]) {
+        allDeps[dep] = versionMap[dep];
+      } else {
+        // Default version for unknown packages
+        allDeps[dep] = '^latest';
+      }
+    });
+
+    // Generate package.json
+    const packageJson = {
       "name": "generated-project",
       "version": "0.1.0",
       "private": true,
@@ -105,16 +85,7 @@ const FileExplorer = ({ files, projectId }: FileExplorerProps) => {
         "start": "next start",
         "lint": "next lint"
       },
-      "dependencies": {
-        "next": "14.0.0",
-        "react": "^18",
-        "react-dom": "^18",
-        "clsx": "^2.1.1",
-        "tailwind-merge": "^2.3.0",
-        "class-variance-authority": "^0.7.1",
-        "radix-ui": "^1.4.2",
-        "lucide-react": "^0.469.0"
-      },
+      "dependencies": allDeps,
       "devDependencies": {
         "@types/node": "^20",
         "@types/react": "^18",
@@ -127,8 +98,12 @@ const FileExplorer = ({ files, projectId }: FileExplorerProps) => {
         "postcss": "^8.4.0",
         "tailwindcss-animate": "^1.0.7"
       }
-    }, null, 2),
-    'next.config.js': `/** @type {import('next').NextConfig} */
+    };
+
+    // Add default project files
+    const defaultFiles = {
+      'package.json': JSON.stringify(packageJson, null, 2),
+      'next.config.js': `/** @type {import('next').NextConfig} */
 const nextConfig = {
   // experimental: {
   //   appDir: true,
@@ -137,35 +112,35 @@ const nextConfig = {
 
 module.exports = nextConfig
 `,
-    'tsconfig.json': JSON.stringify({
-      "compilerOptions": {
-        "target": "es5",
-        "lib": ["dom", "dom.iterable", "es6"],
-        "allowJs": true,
-        "skipLibCheck": true,
-        "strict": true,
-        "noEmit": true,
-        "esModuleInterop": true,
-        "module": "esnext",
-        "moduleResolution": "bundler",
-        "resolveJsonModule": true,
-        "isolatedModules": true,
-        "jsx": "preserve",
-        "incremental": true,
-        "plugins": [
-          {
-            "name": "next"
+      'tsconfig.json': JSON.stringify({
+        "compilerOptions": {
+          "target": "es5",
+          "lib": ["dom", "dom.iterable", "es6"],
+          "allowJs": true,
+          "skipLibCheck": true,
+          "strict": true,
+          "noEmit": true,
+          "esModuleInterop": true,
+          "module": "esnext",
+          "moduleResolution": "bundler",
+          "resolveJsonModule": true,
+          "isolatedModules": true,
+          "jsx": "preserve",
+          "incremental": true,
+          "plugins": [
+            {
+              "name": "next"
+            }
+          ],
+          "baseUrl": ".",
+          "paths": {
+            "@/*": ["./*"]
           }
-        ],
-        "baseUrl": ".",
-        "paths": {
-          "@/*": ["./*"]
-        }
-      },
-      "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-      "exclude": ["node_modules"]
-    }, null, 2),
-    'app/layout.tsx': `import type { Metadata } from 'next'
+        },
+        "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+        "exclude": ["node_modules"]
+      }, null, 2),
+      'app/layout.tsx': `import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 
@@ -188,7 +163,7 @@ export default function RootLayout({
   )
 }
 `,
-    'app/globals.css': `@tailwind base;
+      'app/globals.css': `@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
@@ -248,14 +223,14 @@ export default function RootLayout({
   }
 }
 `,
-    'lib/utils.ts': `import { clsx, type ClassValue } from "clsx";
+      'lib/utils.ts': `import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 `,
-    'components/ui/button.tsx': `import * as React from "react";
+      'components/ui/button.tsx': `import * as React from "react";
 import { Slot as SlotPrimitive } from "radix-ui";
 import { cva, type VariantProps } from "class-variance-authority";
 
@@ -317,7 +292,7 @@ function Button({
 
 export { Button, buttonVariants };
 `,
-    'components/ui/card.tsx': `import * as React from "react"
+      'components/ui/card.tsx': `import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
@@ -410,7 +385,7 @@ export {
   CardContent,
 }
 `,
-    'components/ui/input.tsx': `import * as React from "react"
+      'components/ui/input.tsx': `import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
@@ -432,7 +407,7 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
 
 export { Input }
 `,
-    'tailwind.config.js': `/** @type {import('tailwindcss').Config} */
+      'tailwind.config.js': `/** @type {import('tailwindcss').Config} */
 module.exports = {
   darkMode: ["class"],
   content: [
@@ -510,14 +485,14 @@ module.exports = {
   plugins: [require("tailwindcss-animate")],
 }
 `,
-    'postcss.config.js': `module.exports = {
+      'postcss.config.js': `module.exports = {
   plugins: {
     tailwindcss: {},
     autoprefixer: {},
   },
 }
 `,
-    'app/page.tsx': `export default function Home() {
+      'app/page.tsx': `export default function Home() {
   return (
     <main>
       <h1>Welcome to your generated project!</h1>
@@ -525,120 +500,32 @@ module.exports = {
   )
 }
 `
-  };
+    };
 
-  // Combine default files with generated files (generated files take precedence)
-  const allFiles: FileCollection = { ...defaultFiles, ...files };
+    Object.entries(defaultFiles).forEach(([path, content]) => {
+      zip.file(path, content);
+    });
 
-  const [selectedFile, setSelectedFile] = useState<string | null>(() => {
-    const fileKeys = Object.keys(allFiles);
-    return fileKeys.length > 0 ? fileKeys[0] : null;
-  });
-  const [copied, setCopied] = useState(false);
+    // Add files from each fragment
+    fragments.forEach((fragment: Fragment) => {
+      const files = fragment.files as Record<string, string>; // Assuming files is {path: content}
+      Object.entries(files).forEach(([path, content]) => {
+        zip.file(path, content);
+      });
+    });
 
-  const treeData = useMemo(() => {
-    return convertFilesToTreeItems(allFiles);
-  }, [allFiles]);
+    // Generate ZIP buffer
+    const zipArrayBuffer = await zip.generateAsync({ type: 'arraybuffer' });
 
-  const handleFileSelect = useCallback(
-    (filePath: string) => {
-      if (allFiles[filePath]) {
-        setSelectedFile(filePath);
-      }
-    },
-    [allFiles]
-  );
-
-  const handleCopy = () => {
-    if (selectedFile && allFiles[selectedFile]) {
-      navigator.clipboard
-        .writeText(allFiles[selectedFile])
-        .then(() => {
-          setCopied(true);
-          toast.success("Copied to clipboard");
-          setTimeout(() => {
-            setCopied(false);
-          }, 2000);
-        })
-        .catch(() => {
-          toast.error("Something went wrong. Please try again.");
-        });
-    }
-  };
-
-  const handleDownload = async () => {
-    try {
-      const response = await fetch(`/api/projects/${projectId}/download-zip`);
-      if (!response.ok) {
-        throw new Error('Failed to download ZIP');
-      }
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `project-${projectId}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-      toast.success("Download started");
-    } catch (error) {
-      toast.error("Failed to download ZIP");
-    }
-  };
-
-  return (
-    <ResizablePanelGroup direction="horizontal">
-      <ResizablePanel defaultSize={30} minSize={30} className="bg-sidebar">
-        <TreeView
-          data={treeData}
-          value={selectedFile}
-          onSelect={handleFileSelect}
-        />
-      </ResizablePanel>
-      <ResizableHandle className="hover:bg-primary transition-colors" />
-      <ResizablePanel defaultSize={70} minSize={50}>
-        {selectedFile && allFiles[selectedFile] ? (
-          <div className="h-full w-full flex flex-col">
-            <div className="border-b bg-sidebar px-4 py-2 flex justify-between items-center gap-x-2">
-              <FileBreadcrumb filePath={selectedFile} />
-              <div className="flex gap-x-2">
-                <Hint text="Download Project ZIP" side="bottom">
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={handleDownload}
-                  >
-                    <DownloadIcon />
-                  </Button>
-                </Hint>
-                <Hint text="Copy to Clipboard" side="bottom">
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={handleCopy}
-                    disabled={copied}
-                  >
-                    {copied ? <CopyCheckIcon /> : <CopyIcon />}
-                  </Button>
-                </Hint>
-              </div>
-            </div>
-            <div className="flex-1 overflow-auto">
-              <CodeView
-                code={allFiles[selectedFile]}
-                lang={getLanguageFromExtension(selectedFile)}
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="flex h-full items-center justify-center text-muted-foreground">
-            Select a file to view its content
-          </div>
-        )}
-      </ResizablePanel>
-    </ResizablePanelGroup>
-  );
-};
-
-export { FileExplorer };
+    // Return ZIP as response
+    return new NextResponse(new Uint8Array(zipArrayBuffer), {
+      headers: {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="project-${projectId}.zip"`,
+      },
+    });
+  } catch (error) {
+    console.error('Error generating ZIP:', error);
+    return NextResponse.json({ error: 'Failed to generate ZIP' }, { status: 500 });
+  }
+}

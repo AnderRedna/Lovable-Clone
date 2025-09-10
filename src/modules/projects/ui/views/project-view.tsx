@@ -93,7 +93,7 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
             </TabsContent>
             <TabsContent value="code" className="min-h-0">
               {!!activeFragment?.files && (
-                <FileExplorer files={activeFragment.files as FileCollection} />
+                <FileExplorer files={activeFragment.files as FileCollection} projectId={projectId} />
               )}
             </TabsContent>
           </Tabs>
