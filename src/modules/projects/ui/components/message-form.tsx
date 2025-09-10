@@ -92,7 +92,7 @@ const MessageForm = ({ projectId }: MessageFormProps) => {
           render={({ field }) => (
             <TextareaAutosize
               {...field}
-              placeholder="What would you like to build?"
+              placeholder="O que você gostaria de construir?"
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
               minRows={2}

@@ -5,7 +5,6 @@ import {
   createState,
   createTool,
   type Message,
-  openai,
   type Tool,
 } from "@inngest/agent-kit";
 import { z } from "zod";
@@ -25,6 +24,49 @@ interface AgentState {
   summary: string;
   files: FileCollection;
 }
+
+// Loga todo texto do assistente em um conjunto de mensagens
+function logAssistantTexts(tag: string, messages: Message[]) {
+  for (const m of messages) {
+    if (m.type === "text" && (m as any).role === "assistant") {
+      console.log(`[${tag}] assistant:`, (m as any).content);
+    }
+  }
+}
+
+// Minimal Azure OpenAI adapter compatible with the OpenAI-chat format used by Agent Kit.
+// Avoids requiring the azureOpenai() helper which isn't available in your current @inngest/ai version.
+const azureOpenAICompat = (opts: {
+  endpoint: string;
+  apiKey: string;
+  deployment: string;
+  apiVersion: string;
+  defaultParameters?: Record<string, unknown>;
+}) => {
+  const endpoint = opts.endpoint.replace(/\/$/, "");
+  const url = `${endpoint}/openai/deployments/${opts.deployment}/chat/completions?api-version=${opts.apiVersion}`;
+  return {
+    // Tell Agent Kit to treat this like OpenAI Chat (so it uses the OpenAI parsers)
+    format: "openai-chat",
+    // Options shape is not strictly used at runtime by Agent Kit, keep minimal for TS
+    options: {
+      model: opts.deployment,
+      defaultParameters: opts.defaultParameters ?? {},
+    },
+    // Azure-specific endpoint and headers
+    url,
+    headers: {
+      "api-key": opts.apiKey,
+    },
+    authKey: opts.apiKey,
+    // Drop `model` from the payload (Azure infers from deployment in path)
+    onCall: (_model: any, body: any) => {
+      if (body && typeof body === "object" && "model" in body) {
+        delete body.model;
+      }
+    },
+  } as any;
+};
 
 export const codeAgentFunction = inngest.createFunction(
   { id: "code-agent" },
@@ -97,8 +139,11 @@ export const codeAgentFunction = inngest.createFunction(
       name: "code-agent",
       description: "An expert coding agent",
       system: PROMPT,
-      model: openai({
-        model: "gpt-4.1",
+      model: azureOpenAICompat({
+        endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
+        apiKey: process.env.AZURE_OPENAI_API_KEY!,
+        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
+        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
         defaultParameters: {
           temperature: 0.1,
         },
@@ -209,6 +254,8 @@ export const codeAgentFunction = inngest.createFunction(
       ],
       lifecycle: {
         onResponse: async ({ result, network }) => {
+          // Loga os outputs do modelo a cada iteração
+          logAssistantTexts("code-agent", result.output);
           console.log("Running onResponse lifecycle");
           const lastAssistantTextMessageText =
             lastAssistantTextMessageContent(result);
@@ -249,8 +296,11 @@ export const codeAgentFunction = inngest.createFunction(
       name: "fragment-title-generator",
       description: "A fragment title generator",
       system: FRAGMENT_TITLE_PROMPT,
-      model: openai({
-        model: "gpt-4o",
+      model: azureOpenAICompat({
+        endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
+        apiKey: process.env.AZURE_OPENAI_API_KEY!,
+        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
+        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
         defaultParameters: {
           temperature: 0.1,
         },
@@ -261,22 +311,27 @@ export const codeAgentFunction = inngest.createFunction(
       name: "response-generator",
       description: "A response generator",
       system: RESPONSE_PROMPT,
-      model: openai({
-        model: "gpt-4o",
+      model: azureOpenAICompat({
+        endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
+        apiKey: process.env.AZURE_OPENAI_API_KEY!,
+        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
+        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
         defaultParameters: {
           temperature: 0.1,
         },
       }),
     });
 
-    const { output: fragmentTitleOutput } = await fragmentTitleGenerator.run(
+  const { output: fragmentTitleOutput } = await fragmentTitleGenerator.run(
       result.state.data.summary
     );
+  logAssistantTexts("fragment-title-generator", fragmentTitleOutput);
     console.log("Completed fragmentTitleGenerator.run");
 
-    const { output: responseOutput } = await responseGenerator.run(
+  const { output: responseOutput } = await responseGenerator.run(
       result.state.data.summary
     );
+  logAssistantTexts("response-generator", responseOutput);
     console.log("Completed responseGenerator.run");
 
     const isError =

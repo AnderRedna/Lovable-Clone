@@ -18,10 +18,10 @@ export default function HomePage() {
           />
         </div>
         <h1 className="text-2xl md:text-5xl font-bold text-center">
-          Build something with Lovable Clone
+          Crie uma landing page profissional em segundos
         </h1>
         <p className="text-lg md:text-xl text-muted-foreground text-center">
-          Create apps and websites by chatting with AI
+          Foco em conversão, design moderno e SEO.
         </p>
 
         <div className="max-w-3xl mx-auto w-full">
