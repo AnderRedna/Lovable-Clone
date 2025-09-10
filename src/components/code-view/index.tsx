@@ -20,7 +20,7 @@ const CodeView = ({ code, lang }: CodeViewProps) => {
   }, [code]);
 
   return (
-    <pre className="p-2 bg-transparent border-none rounded-none m-0 text-xs">
+    <pre className="p-2 bg-transparent border-none rounded-none m-0 text-xs max-h-full h-full overflow-auto">
       <code className={`language-${lang}`}>{code}</code>
     </pre>
   );

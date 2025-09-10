@@ -366,56 +366,71 @@ export const codeAgentFunction = inngest.createFunction(
       !result.state.data.summary ||
       Object.keys(result.state.data.files || {}).length === 0;
 
-    // Best-effort analytics injection into <head>
-  if (!isError && customization?.analytics && customization?.analytics?.provider !== "none") {
+    // Best-effort analytics injection (Next.js App Router friendly)
+    if (!isError && customization?.analytics && customization?.analytics?.provider !== "none") {
       await step.run("inject-analytics", async () => {
         try {
-          const snippet = (customization?.analytics?.code || "").trim();
-          if (!snippet) return;
+          const raw = (customization?.analytics?.code || "").trim();
+          if (!raw) return;
+          // Strip <script> wrapper if present
+          const m = raw.match(/<script[^>]*>([\s\S]*?)<\/script>/i);
+          const code = (m ? m[1] : raw).trim();
+
           const files = result.state.data.files || {};
           const candidates = Object.keys(files);
-          const preferredOrder = [
-            /app\/layout\.(tsx|jsx|ts|js)$/i,
-            /pages\/_document\.(tsx|jsx)$/i,
-            /index\.html$/i,
-          ];
-          let targetPath: string | undefined;
-          let updatedContent: string | undefined;
-
-          // Try preferred files first
-          for (const regex of preferredOrder) {
-            const found = candidates.find((p) => regex.test(p));
-            if (found) {
-              const content = files[found] as string;
-              if (content.includes("</head>")) {
-                updatedContent = content.replace(/<\/head>/i, `\n  {/* Analytics */}\n  ${snippet}\n</head>`);
-                targetPath = found;
-                break;
-              }
-            }
-          }
-
-          // Fallback: any file that has a head tag
-          if (!updatedContent) {
-            for (const p of candidates) {
-              const content = files[p] as string;
-              if (content.includes("</head>")) {
-                updatedContent = content.replace(/<\/head>/i, `\n  {/* Analytics */}\n  ${snippet}\n</head>`);
-                targetPath = p;
-                break;
-              }
-            }
-          }
-
+          const layoutPath = candidates.find((p) => /app\/layout\.(tsx|jsx|ts|js)$/i.test(p));
           const sandbox = await getSandbox(sandboxId);
 
-          // If still not found, create app/head.tsx
-          if (!updatedContent) {
-            targetPath = "app/head.tsx";
-            updatedContent = `export default function Head() {\n  return (\n    <>\n      {/* Analytics */}\n      ${snippet}\n    </>\n  );\n}\n`;
+          if (layoutPath) {
+            // 1) Write app/analytics.tsx component
+            const analyticsPath = "app/analytics.tsx";
+            const analyticsContent = `"use client";\nimport Script from 'next/script';\nexport default function AppAnalytics() {\n  return (\n    <>\n      <Script id=\"custom-analytics\" strategy=\"afterInteractive\" dangerouslySetInnerHTML={{ __html: \`${code.replace(/`/g, "\\`")}\` }} />\n    </>\n  );\n}\n`;
+            await sandbox.files.write(analyticsPath, analyticsContent);
+            result.state.data.files[analyticsPath] = analyticsContent;
+
+            // 2) Inject import and <AppAnalytics /> into layout
+            const layoutRaw = files[layoutPath] as string;
+            const hasImport = /from\s+['"]@\/app\/analytics['"]/m.test(layoutRaw) || /from\s+['"]\.\/analytics['"]/m.test(layoutRaw);
+            let nextLayout = layoutRaw;
+            if (!hasImport) {
+              // Insert import after first import or at top
+              if (/^import\s/m.test(nextLayout)) {
+                nextLayout = nextLayout.replace(/^(import[\s\S]*?;\s*)/m, `$1\nimport AppAnalytics from '@/app/analytics';\n`);
+              } else {
+                nextLayout = `import AppAnalytics from '@/app/analytics';\n` + nextLayout;
+              }
+            }
+            if (!/\<AppAnalytics\s*\/>/m.test(nextLayout)) {
+              // Try to drop right after opening <body ...>
+              const bodyIdx = nextLayout.search(/<body[^>]*>/i);
+              if (bodyIdx !== -1) {
+                const insertPos = nextLayout.indexOf('>', bodyIdx) + 1;
+                nextLayout = nextLayout.slice(0, insertPos) + `\n      <AppAnalytics />` + nextLayout.slice(insertPos);
+              } else {
+                // Fallback: before {children}
+                nextLayout = nextLayout.replace(/(\{\s*children\s*\})/m, `<AppAnalytics />\n      $1`);
+              }
+            }
+            await sandbox.files.write(layoutPath, nextLayout);
+            result.state.data.files[layoutPath] = nextLayout;
+            return;
           }
 
-          // Persist
+          // Fallbacks: try raw head injection or create app/head.tsx
+          let targetPath: string | undefined;
+          let updatedContent: string | undefined;
+          for (const p of candidates) {
+            const content = files[p] as string;
+            if (content.includes("</head>")) {
+              updatedContent = content.replace(/<\/head>/i, `\n  {/* Analytics */}\n  <script>\n${code}\n  </script>\n</head>`);
+              targetPath = p;
+              break;
+            }
+          }
+          if (!updatedContent) {
+            targetPath = "app/head.tsx";
+            updatedContent = `export default function Head() {\n  return (\n    <>\n      {/* Analytics */}\n      <script>\n${code}\n      </script>\n    </>\n  );\n}\n`;
+          }
           if (targetPath && updatedContent) {
             await sandbox.files.write(targetPath, updatedContent);
             result.state.data.files[targetPath] = updatedContent;
@@ -440,7 +455,7 @@ export const codeAgentFunction = inngest.createFunction(
           }
         };
 
-        // 1) Sanitize package.json versions like ^latest or ~latest
+        // 1) Sanitize package.json: versions like ^latest/~latest, invalid package names, fix next-themes
         try {
           const pkgPath = "package.json";
           const pkgRaw = await readSafe(pkgPath);
@@ -450,13 +465,34 @@ export const codeAgentFunction = inngest.createFunction(
               if (!deps) return;
               for (const k of Object.keys(deps)) {
                 const v = deps[k];
-                if (typeof v === "string" && (/^\^latest$/i.test(v) || /^~latest$/i.test(v))) {
-                  deps[k] = "latest";
+                // Remove clearly invalid package names (import paths accidentally added to deps)
+                if (/\//.test(k) && !k.startsWith("@")) {
+                  delete deps[k];
+                  continue;
+                }
+                if (k === "next/font/google" || k === "motion/react") {
+                  delete deps[k];
+                  continue;
+                }
+                // Normalize invalid tags
+                if (typeof v === "string") {
+                  const vv = v.trim();
+                  if (/^\^latest$/i.test(vv) || /^~latest$/i.test(vv)) {
+                    deps[k] = "latest";
+                  }
+                  // next-themes bogus versions – set to a known good range
+                  if (k === "next-themes") {
+                    if (!/^\d/.test(vv) && !/^~?\^?\d/.test(vv)) {
+                      deps[k] = "^0.3.0";
+                    }
+                  }
                 }
               }
             };
             fix(pkg.dependencies);
             fix(pkg.devDependencies);
+            fix(pkg.peerDependencies);
+            fix(pkg.optionalDependencies);
             const nextRaw = JSON.stringify(pkg, null, 2) + "\n";
             if (nextRaw !== pkgRaw) {
               await sandbox.files.write(pkgPath, nextRaw);
@@ -467,9 +503,14 @@ export const codeAgentFunction = inngest.createFunction(
           console.warn("postprocess: package.json sanitize failed", e);
         }
 
-        // 2) Ensure Tailwind config and shadcn tokens
+        // 2) Ensure Tailwind config and shadcn tokens (prefer CJS for compatibility)
         try {
-          const twPaths = ["tailwind.config.ts", "tailwind.config.js"];
+          const twPaths = [
+            "tailwind.config.cjs",
+            "tailwind.config.js",
+            "tailwind.config.mjs",
+            "tailwind.config.ts",
+          ];
           let twPath: string | undefined;
           let twRaw: string | undefined;
           for (const p of twPaths) {
@@ -480,12 +521,12 @@ export const codeAgentFunction = inngest.createFunction(
               break;
             }
           }
-          const shadcnTw = `/** @type {import('tailwindcss').Config} */\nmodule.exports = {\n  darkMode: ['class'],\n  content: [\n    './app/**/*.{ts,tsx}',\n    './components/**/*.{ts,tsx}',\n  ],\n  theme: {\n    extend: {\n      colors: {\n        border: 'hsl(var(--border))',\n        input: 'hsl(var(--input))',\n        ring: 'hsl(var(--ring))',\n        background: 'hsl(var(--background))',\n        foreground: 'hsl(var(--foreground))',\n        primary: { DEFAULT: 'hsl(var(--primary))', foreground: 'hsl(var(--primary-foreground))' },\n        secondary: { DEFAULT: 'hsl(var(--secondary))', foreground: 'hsl(var(--secondary-foreground))' },\n        destructive: { DEFAULT: 'hsl(var(--destructive))', foreground: 'hsl(var(--destructive-foreground))' },\n        muted: { DEFAULT: 'hsl(var(--muted))', foreground: 'hsl(var(--muted-foreground))' },\n        accent: { DEFAULT: 'hsl(var(--accent))', foreground: 'hsl(var(--accent-foreground))' },\n        popover: { DEFAULT: 'hsl(var(--popover))', foreground: 'hsl(var(--popover-foreground))' },\n        card: { DEFAULT: 'hsl(var(--card))', foreground: 'hsl(var(--card-foreground))' },\n      },\n      borderRadius: {\n        lg: 'var(--radius)',\n        md: 'calc(var(--radius) - 2px)',\n        sm: 'calc(var(--radius) - 4px)',\n      },\n    },\n  },\n  plugins: [],\n}\n`;
-          const needsWrite = !twRaw || !/colors:\s*\{[\s\S]*border:/m.test(twRaw);
+          const shadcnTwCjs = `/** @type {import('tailwindcss').Config} */\nmodule.exports = {\n  darkMode: ['class'],\n  content: [\n    './app/**/*.{ts,tsx}',\n    './components/**/*.{ts,tsx}',\n    './pages/**/*.{ts,tsx}',\n    './src/**/*.{ts,tsx}',\n  ],\n  theme: {\n    extend: {\n      colors: {\n        border: 'hsl(var(--border))',\n        input: 'hsl(var(--input))',\n        ring: 'hsl(var(--ring))',\n        background: 'hsl(var(--background))',\n        foreground: 'hsl(var(--foreground))',\n        primary: { DEFAULT: 'hsl(var(--primary))', foreground: 'hsl(var(--primary-foreground))' },\n        secondary: { DEFAULT: 'hsl(var(--secondary))', foreground: 'hsl(var(--secondary-foreground))' },\n        destructive: { DEFAULT: 'hsl(var(--destructive))', foreground: 'hsl(var(--destructive-foreground))' },\n        muted: { DEFAULT: 'hsl(var(--muted))', foreground: 'hsl(var(--muted-foreground))' },\n        accent: { DEFAULT: 'hsl(var(--accent))', foreground: 'hsl(var(--accent-foreground))' },\n        popover: { DEFAULT: 'hsl(var(--popover))', foreground: 'hsl(var(--popover-foreground))' },\n        card: { DEFAULT: 'hsl(var(--card))', foreground: 'hsl(var(--card-foreground))' },\n      },\n      borderRadius: {\n        lg: 'var(--radius)',\n        md: 'calc(var(--radius) - 2px)',\n        sm: 'calc(var(--radius) - 4px)',\n      },\n    },\n  },\n  plugins: [],\n}\n`;
+          const needsWrite = !twRaw || !/colors:\s*\{[\s\S]*border:/m.test(twRaw) || !/content:\s*\[/m.test(twRaw);
           if (needsWrite) {
-            const pathToWrite = twPath || "tailwind.config.js";
-            await sandbox.files.write(pathToWrite, shadcnTw);
-            result.state.data.files[pathToWrite] = shadcnTw;
+            const pathToWrite = twPath && twPath.endsWith(".cjs") ? twPath : "tailwind.config.cjs";
+            await sandbox.files.write(pathToWrite, shadcnTwCjs);
+            result.state.data.files[pathToWrite] = shadcnTwCjs;
           }
         } catch (e) {
           console.warn("postprocess: tailwind config ensure failed", e);
@@ -540,21 +581,17 @@ export const codeAgentFunction = inngest.createFunction(
           console.warn("postprocess: utils.ts ensure failed", e);
         }
 
-        // 6) Stub missing UI components referenced in app/page.tsx
+        // 6) Stub missing UI components referenced anywhere in the project
         try {
-          const pagePath = "app/page.tsx";
-          const pageRaw = await readSafe(pagePath);
-          if (pageRaw) {
-            const importRegex = new RegExp(String.raw`import\s+([^'";]+)\s+from\s+["']@/components/ui/([^"']+)["'];?`, "g");
-            const lines = pageRaw.split("\n");
-            const imports = lines
-              .map((l) => l)
-              .join("\n")
-              .matchAll(importRegex);
-            const modules = new Map<string, string[]>();
-            for (const m of imports) {
-              const spec = m[1].trim(); // e.g., { A, B } or Default or Default, { A }
-              const mod = m[2].trim(); // e.g., accordion
+          const importRegex = new RegExp(String.raw`import\s+([^'";]+)\s+from\s+["']@/components/ui/([^"']+)["'];?`, "g");
+          const modules = new Map<string, string[]>();
+          for (const [path, content] of Object.entries(result.state.data.files)) {
+            if (typeof content !== "string") continue;
+            if (!/(\.tsx|\.ts|\.jsx|\.js)$/i.test(path)) continue;
+            const matches = content.matchAll(importRegex);
+            for (const m of matches) {
+              const spec = m[1].trim();
+              const mod = m[2].trim();
               const names: string[] = [];
               const named = spec.match(/\{([^}]+)\}/);
               if (named) {
@@ -565,10 +602,36 @@ export const codeAgentFunction = inngest.createFunction(
               const prev = modules.get(mod) || [];
               modules.set(mod, prev.concat(names));
             }
-            for (const [mod, names] of modules) {
-              const target = `components/ui/${mod}.tsx`;
-              const exists = await readSafe(target);
-              if (!exists) {
+          }
+          for (const [mod, names] of modules) {
+            const target = `components/ui/${mod}.tsx`;
+            const exists = await readSafe(target);
+            if (!exists) {
+              if (mod === "accordion") {
+                // Write a real shadcn-style accordion using Radix (no CSS files required)
+                const content = `"use client";\n\nimport * as React from "react";\nimport * as AccordionPrimitive from "@radix-ui/react-accordion";\nimport { ChevronDown } from "lucide-react";\nimport { cn } from "@/lib/utils";\n\nconst Accordion = AccordionPrimitive.Root;\n\nconst AccordionItem = React.forwardRef<\n  HTMLDivElement,\n  React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Item>\n>(({ className, ...props }, ref) => (\n  <AccordionPrimitive.Item\n    ref={ref}\n    className={cn("border-b", className)}\n    {...props}\n  />\n));\nAccordionItem.displayName = "AccordionItem";\n\nconst AccordionTrigger = React.forwardRef<\n  HTMLButtonElement,\n  React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Trigger>\n>(({ className, children, ...props }, ref) => (\n  <AccordionPrimitive.Header className="flex">\n    <AccordionPrimitive.Trigger\n      ref={ref}\n      className={cn(\n        "flex flex-1 items-center justify-between py-4 text-left font-medium transition-all hover:underline",\n        className\n      )}\n      {...props}\n    >\n      {children}\n      <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 data-[state=open]:rotate-180" />\n    </AccordionPrimitive.Trigger>\n  </AccordionPrimitive.Header>\n));\nAccordionTrigger.displayName = AccordionPrimitive.Trigger.displayName;\n\nconst AccordionContent = React.forwardRef<\n  HTMLDivElement,\n  React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Content>\n>(({ className, children, ...props }, ref) => (\n  <AccordionPrimitive.Content\n    ref={ref}\n    className={cn(\n      "overflow-hidden text-sm transition-all data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down",\n      className\n    )}\n    {...props}\n  >\n    <div className="pb-4 pt-0">{children}</div>\n  </AccordionPrimitive.Content>\n));\nAccordionContent.displayName = AccordionPrimitive.Content.displayName;\n\nexport { Accordion, AccordionItem, AccordionTrigger, AccordionContent };\n`;
+                await sandbox.files.write(target, content);
+                result.state.data.files[target] = content;
+
+                // Ensure dependency exists in package.json
+                try {
+                  const pkgPath = "package.json";
+                  const pkgRaw = await readSafe(pkgPath);
+                  if (pkgRaw) {
+                    const pkg = JSON.parse(pkgRaw);
+                    pkg.dependencies = pkg.dependencies || {};
+                    if (!pkg.dependencies["@radix-ui/react-accordion"]) {
+                      pkg.dependencies["@radix-ui/react-accordion"] = "latest";
+                      const nextRaw = JSON.stringify(pkg, null, 2) + "\n";
+                      await sandbox.files.write(pkgPath, nextRaw);
+                      result.state.data.files[pkgPath] = nextRaw;
+                    }
+                  }
+                } catch (e) {
+                  console.warn("postprocess: add @radix-ui/react-accordion failed", e);
+                }
+              } else {
+                // Fallback: lightweight stub
                 const exports: string[] = [];
                 const defaultName = names.find((n) => n.startsWith("default:"))?.split(":")[1];
                 if (defaultName) {
@@ -587,6 +650,63 @@ export const codeAgentFunction = inngest.createFunction(
           }
         } catch (e) {
           console.warn("postprocess: stub ui components failed", e);
+        }
+
+  // 7) Ensure shadcn components.json exists (helps users extend components later)
+        try {
+          const cfgPath = "components.json";
+          const existing = await readSafe(cfgPath);
+          if (!existing) {
+            // Detect tailwind config file name written earlier
+            const twJs = await readSafe("tailwind.config.js");
+            const twCjs = await readSafe("tailwind.config.cjs");
+            const twFile = twJs ? "tailwind.config.js" : twCjs ? "tailwind.config.cjs" : "tailwind.config.js";
+            const cfg = {
+              $schema: "https://ui.shadcn.com/schema.json",
+              style: "default",
+              rsc: true,
+              tsx: true,
+              tailwind: {
+                config: twFile,
+                css: "app/globals.css",
+                baseColor: "slate",
+                cssVariables: true,
+                prefix: "",
+              },
+              aliases: { components: "@/components", utils: "@/lib/utils" },
+            } as any;
+            const raw = JSON.stringify(cfg, null, 2) + "\n";
+            await sandbox.files.write(cfgPath, raw);
+            result.state.data.files[cfgPath] = raw;
+          }
+        } catch (e) {
+          console.warn("postprocess: components.json ensure failed", e);
+        }
+
+        // 8) Defensive: backgrounds shouldn't block clicks.
+        try {
+          const entries = Object.entries(result.state.data.files);
+          for (const [path, content] of entries) {
+            if (!/\.(tsx|jsx)$/.test(path)) continue;
+            if (typeof content !== "string") continue;
+            // Add pointer-events-none and select-none to common decorative background wrappers
+            let next = content.replace(
+              /(className=\"[^\"]*\babsolute\b[^\"]*\binset-0\b[^\"]*)(\")/g,
+              (m, p1, p2) =>
+                p1.includes("pointer-events-none") ? m : `${p1} pointer-events-none select-none${p2}`
+            );
+            // Ensure such bg containers go behind content
+            next = next.replace(
+              /(className=\"[^\"]*\babsolute\b[^\"]*)(\")/g,
+              (m, p1, p2) => (p1.includes("-z-10") ? m : `${p1} -z-10${p2}`)
+            );
+            if (next !== content) {
+              await sandbox.files.write(path, next);
+              result.state.data.files[path] = next;
+            }
+          }
+        } catch (e) {
+          console.warn("postprocess: background safety patch failed", e);
         }
       });
     }
