@@ -16,8 +16,7 @@ import { PROJECT_TEMPLATES } from "@/constants";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { Label } from "@/components/ui/label";
+import { WizardModal, AnalyticsStep, ComponentsStep, ComponentPromptsStep } from "./project-form/index";
 
 const formSchema = z.object({
   value: z
@@ -79,30 +78,11 @@ const ProjectForm = () => {
   const [isCustomizing, setIsCustomizing] = useState(false);
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [wizardActive, setWizardActive] = useState(false);
+  const [componentEditIndex, setComponentEditIndex] = useState<number | null>(null);
 
-  type AnalyticsProvider = "none" | "google-analytics" | "clarity" | "other";
-  type ComponentKey =
-    | "Background"
-    | "Announcement"
-    | "CallToAction"
-    | "Clients"
-    | "Features"
-    | "Footers"
-    | "Heroes"
-    | "Images"
-    | "Header"
-    | "Pricing"
-    | "Testimonials"
-    | "Video";
-
-  type ComponentConfig = {
-    enabled: boolean;
-    prompt?: string;
-    border?: {
-      enabled: boolean;
-      prompt?: string;
-    };
-  };
+  type AnalyticsProvider = import("./project-form/types").AnalyticsProvider;
+  type ComponentKey = import("./project-form/types").ComponentKey;
+  type ComponentConfig = import("./project-form/types").ComponentConfig;
 
   const componentKeys: ComponentKey[] = [
     "Background",
@@ -135,6 +115,7 @@ const ProjectForm = () => {
   const resetWizard = () => {
     setStep(1);
   setWizardActive(false);
+  setComponentEditIndex(null);
     setAnalytics({ provider: "none", code: "" });
     setComponentsCfg(
       componentKeys.reduce((acc, key) => {
@@ -166,9 +147,8 @@ const ProjectForm = () => {
 
     // Start wizard on first submit click
     if (!wizardActive) {
-      if (!canAdvanceFromStep1) return; // need valid base info to proceed
       setWizardActive(true);
-      setStep(2); // Step 1 is auto-complete; jump to Step 2
+      setStep(1); // Start from step 1
       return;
     }
 
@@ -183,11 +163,30 @@ const ProjectForm = () => {
       setStep(3);
       return;
     }
-    // step 3 -> finish
-    if (!canFinish) return;
+    // step 3 -> component prompts (3.1) flow
+    const enabledKeys = componentKeys.filter((k) => componentsCfg[k].enabled);
+    const lastIndex = enabledKeys.length - 1;
 
-    // NOTE: Backend currently accepts only { value }.
-    // We proceed with current API and preserve selections for future use.
+    // If not yet in substep and there are components, start at first
+    if (componentEditIndex === null) {
+      if (enabledKeys.length > 0) {
+        setComponentEditIndex(0);
+        return;
+      }
+      // No components -> finish directly if allowed
+      if (!canFinish) return;
+      await form.handleSubmit(onSubmit)();
+      return;
+    }
+
+    // In substep
+    if (componentEditIndex < lastIndex) {
+      setComponentEditIndex((i) => (i ?? 0) + 1);
+      return;
+    }
+
+    // Last component -> finish
+    if (!canFinish) return;
     await form.handleSubmit(onSubmit)();
   };
 
@@ -201,9 +200,8 @@ const ProjectForm = () => {
             isFocused && "shadow-xs"
           )}
         >
-          {/* Step content */}
-          {/* Step 1: Basic info (existing prompt) */}
-          {(!wizardActive || step === 1) && (
+          {/* Step 1: Basic info (existing prompt) stays inline only if not wizard */}
+          {!wizardActive && (
             <FormField
               control={form.control}
               name="value"
@@ -220,17 +218,11 @@ const ProjectForm = () => {
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && e.ctrlKey) {
                         e.preventDefault();
-                        // Ctrl+Enter behaves like submit button
                         handleArrowAction();
                       }
                     }}
                     disabled={isPending}
                   />
-                  {wizardActive && (
-                    <div className="mt-2 text-[10px] inline-flex items-center gap-1 px-2 py-0.5 border rounded bg-background">
-                      Etapa 1 ficará marcada como concluída automaticamente
-                    </div>
-                  )}
                 </div>
               )}
             />
@@ -245,7 +237,6 @@ const ProjectForm = () => {
                 const next = !isCustomizing;
                 setIsCustomizing(next);
                 if (!next) {
-                  // Leaving customize mode resets wizard for next time
                   resetWizard();
                 }
               }}
@@ -269,11 +260,7 @@ const ProjectForm = () => {
                     : (isCustomizing ? !canAdvanceFromStep1 || isPending : isDisabled)
                 }
               >
-                {isPending ? (
-                  <Loader2Icon className="animate-spin" />
-                ) : (
-                  <ArrowUpIcon />
-                )}
+                {isPending ? <Loader2Icon className="animate-spin" /> : <ArrowUpIcon />}
               </Button>
             </div>
           </div>
@@ -296,266 +283,106 @@ const ProjectForm = () => {
       </section>
 
       {/* Wizard Modal */}
-      {wizardActive && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div
-            className={cn(
-              "bg-background border rounded-xl shadow-2xl overflow-hidden transition-all duration-500 ease-out",
-              "w-80 h-80 scale-50 opacity-0", // Initial small size and hidden
-              wizardActive && "scale-100 opacity-100 w-[90vw] h-[90vh] max-w-4xl max-h-[80vh]" // Expanded to large square
-            )}
-          >
-            <div className="flex h-full">
-              {/* Left Sidebar: Stepper */}
-              <div className="w-1/4 bg-muted/50 p-6 border-r flex flex-col justify-center">
-                <div className="space-y-6">
-                  {[1, 2, 3].map((s, index) => {
-                    const isActive = step === s;
-                    const isDone = step > s;
-                    const labels = {
-                      1: "Informações básicas",
-                      2: "Monitoramento",
-                      3: "Componentes",
-                    } as const;
-                    return (
-                      <div key={s} className="flex items-center gap-3 relative">
-                        <div
-                          className={cn(
-                            "size-10 grid place-items-center border-2 text-sm font-medium rounded-full transition-colors",
-                            isActive && "bg-primary text-primary-foreground border-primary",
-                            isDone && "bg-muted text-foreground border-muted",
-                            !isActive && !isDone && "bg-background border-border"
-                          )}
-                        >
-                          {isDone ? "✓" : s}
-                        </div>
-                        <span className={cn("text-sm", isActive && "font-semibold")}>
-                          {labels[s as 1 | 2 | 3]}
-                        </span>
-                        {index < 2 && (
-                          <div className="absolute left-5 top-10 w-0.5 h-6 bg-border"></div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Right Content */}
-              <div className="flex-1 p-6 overflow-y-auto">
-                {/* Step 2: Analytics */}
-                {step === 2 && (
-                  <div className="space-y-4">
-                    <h2 className="text-lg font-semibold">Monitoramento</h2>
-                    <div className="grid grid-cols-2 gap-4">
-                      {([
-                        { key: "google-analytics", label: "Google Analytics" },
-                        { key: "clarity", label: "Clarity" },
-                        { key: "other", label: "Outros" },
-                        { key: "none", label: "Nenhum" },
-                      ] as { key: AnalyticsProvider; label: string }[]).map((opt) => {
-                        const selected = analytics.provider === opt.key;
-                        return (
-                          <button
-                            key={opt.key}
-                            type="button"
-                            onClick={() =>
-                              setAnalytics((a) => ({ ...a, provider: opt.key, code: opt.key === "none" ? "" : a.code }))
-                            }
-                            className={cn(
-                              "border rounded-lg aspect-square p-4 text-left transition-colors",
-                              "hover:border-primary",
-                              selected && "border-primary bg-primary/5"
-                            )}
-                          >
-                            <div className="font-medium">{opt.label}</div>
-                            <div className="text-xs text-muted-foreground mt-2">
-                              {opt.key === "none" ? "Sem monitoramento" : "Adiciona código no <head>"}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {analytics.provider !== "none" && (
-                      <div className="space-y-2">
-                        <Label htmlFor="analytics-code">Código de inserção no head</Label>
-                        <TextareaAutosize
-                          id="analytics-code"
-                          minRows={3}
-                          className="w-full resize-y rounded-md border bg-transparent p-2 text-sm"
-                          placeholder={
-                            analytics.provider === "google-analytics"
-                              ? "<!-- GA4 snippet -->\n<script>/* ... */</script>"
-                              : analytics.provider === "clarity"
-                              ? "<!-- Clarity snippet -->\n<script>/* ... */</script>"
-                              : "Cole aqui o código do seu provedor"
-                          }
-                          value={analytics.code}
-                          onChange={(e) => setAnalytics((a) => ({ ...a, code: e.target.value }))}
-                          disabled={isPending}
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Step 3: Components selection and per-component prompts */}
-                {step === 3 && (
-                  <div className="space-y-4">
-                    <h2 className="text-lg font-semibold">Componentes</h2>
-                    <div>
-                      <div className="mb-4 text-sm font-medium">Selecione os componentes</div>
-                      <div className="grid grid-cols-3 gap-4">
-                        {componentKeys.map((key) => {
-                          const selected = componentsCfg[key].enabled;
-                          return (
-                            <button
-                              key={key}
-                              type="button"
-                              onClick={() =>
-                                setComponentsCfg((prev) => ({
-                                  ...prev,
-                                  [key]: { ...prev[key], enabled: !prev[key].enabled },
-                                }))
-                              }
-                              className={cn(
-                                "border rounded-lg aspect-square p-4 text-left text-sm transition-colors",
-                                "hover:border-primary",
-                                selected && "border-primary bg-primary/5"
-                              )}
-                            >
-                              <div className="font-medium">{key}</div>
-                              <div className="text-xs text-muted-foreground mt-2">Clique para {selected ? "remover" : "adicionar"}</div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Editor for selected components */}
-                    <div className="space-y-4">
-                      {componentKeys.filter((k) => componentsCfg[k].enabled).length === 0 && (
-                        <div className="text-xs text-muted-foreground">Nenhum componente selecionado. Você pode prosseguir sem componentes.</div>
-                      )}
-                      {componentKeys
-                        .filter((k) => componentsCfg[k].enabled)
-                        .map((k) => {
-                          const cfg = componentsCfg[k];
-                          return (
-                            <div key={k} className="border rounded-lg p-4">
-                              <div className="flex items-center justify-between mb-2">
-                                <div className="font-medium">{k}</div>
-                                <Link
-                                  href="https://21st.dev/components"
-                                  target="_blank"
-                                  className="text-xs text-primary hover:underline"
-                                >
-                                  Ver prompts no 21st.dev
-                                </Link>
-                              </div>
-                              <div className="space-y-2">
-                                <Label htmlFor={`prompt-${k}`}>Prompt do componente (opcional)</Label>
-                                <TextareaAutosize
-                                  id={`prompt-${k}`}
-                                  minRows={2}
-                                  className="w-full resize-y rounded-md border bg-transparent p-2 text-sm"
-                                  placeholder={`Descreva o conteúdo/estilo para ${k}`}
-                                  value={cfg.prompt ?? ""}
-                                  onChange={(e) =>
-                                    setComponentsCfg((prev) => ({
-                                      ...prev,
-                                      [k]: { ...prev[k], prompt: e.target.value },
-                                    }))
-                                  }
-                                  disabled={isPending}
-                                />
-
-                                <div className="flex items-center gap-2 mt-2">
-                                  <input
-                                    id={`border-${k}`}
-                                    type="checkbox"
-                                    className="size-4"
-                                    checked={!!cfg.border?.enabled}
-                                    onChange={(e) =>
-                                      setComponentsCfg((prev) => ({
-                                        ...prev,
-                                        [k]: {
-                                          ...prev[k],
-                                          border: { ...(prev[k].border || { prompt: "" }), enabled: e.target.checked },
-                                        },
-                                      }))
-                                    }
-                                  />
-                                  <Label htmlFor={`border-${k}`}>Definir borda</Label>
-                                </div>
-
-                                {cfg.border?.enabled && (
-                                  <div className="space-y-2 mt-2">
-                                    <Label htmlFor={`border-prompt-${k}`}>Prompt da borda</Label>
-                                    <TextareaAutosize
-                                      id={`border-prompt-${k}`}
-                                      minRows={2}
-                                      className={cn(
-                                        "w-full resize-y rounded-md border bg-transparent p-2 text-sm",
-                                        !cfg.border?.prompt && "border-destructive/50"
-                                      )}
-                                      placeholder={`Descreva a borda a aplicar em ${k}`}
-                                      value={cfg.border?.prompt ?? ""}
-                                      onChange={(e) =>
-                                        setComponentsCfg((prev) => ({
-                                          ...prev,
-                                          [k]: {
-                                            ...prev[k],
-                                            border: { ...(prev[k].border || { enabled: true }), prompt: e.target.value },
-                                          },
-                                        }))
-                                      }
-                                      disabled={isPending}
-                                    />
-                                    {!cfg.border?.prompt && (
-                                      <div className="text-[10px] text-destructive">Informe o prompt da borda para concluir.</div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Footer Buttons */}
-                <div className="flex justify-between items-center mt-6 pt-4 border-t">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      if (step > 1) {
-                        setStep((s) => (s - 1) as 1 | 2 | 3);
-                      } else {
-                        resetWizard();
+      <WizardModal
+        open={wizardActive}
+        step={step}
+        onClose={resetWizard}
+        subStepLabel={step === 3 && componentEditIndex !== null ? `3.${componentEditIndex + 1}` : undefined}
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                if (step === 3 && componentEditIndex !== null) {
+                  // Inside component prompts substep
+                  setComponentEditIndex((i) => {
+                    if (i && i > 0) return i - 1;
+                    return null; // go back to components grid
+                  });
+                  return;
+                }
+                if (step > 1) {
+                  setStep((s) => (s - 1) as 1 | 2 | 3);
+                } else {
+                  resetWizard();
+                }
+              }}
+            >
+              {step === 1 ? "Cancelar" : step === 3 && componentEditIndex !== null ? "Anterior" : "Voltar"}
+            </Button>
+            <Button
+              type="button"
+              onClick={handleArrowAction}
+              disabled={
+                (step === 1 && !canAdvanceFromStep1) ||
+                (step === 2 && !canAdvanceFromStep2) ||
+                (step === 3 && componentEditIndex !== null && componentKeys.filter((k) => componentsCfg[k].enabled).length > 0
+                  ? // In substep: only disable on last when cannot finish
+                    (componentEditIndex === componentKeys.filter((k) => componentsCfg[k].enabled).length - 1 && !canFinish)
+                  : false)
+              }
+            >
+              {step === 3
+                ? componentEditIndex === null
+                  ? (componentKeys.filter((k) => componentsCfg[k].enabled).length > 0 ? "Avançar" : "Concluir")
+                  : (componentEditIndex < componentKeys.filter((k) => componentsCfg[k].enabled).length - 1 ? "Próximo" : "Concluir")
+                : "Avançar"}
+            </Button>
+          </>
+        }
+      >
+        {step === 1 && (
+          <div className="space-y-4">
+            <h2 className="text-lg font-semibold">Informações básicas</h2>
+            <FormField
+              control={form.control}
+              name="value"
+              render={({ field }) => (
+                <div>
+                  <TextareaAutosize
+                    {...field}
+                    placeholder="Descreva a landing page que você deseja criar."
+                    onFocus={() => setIsFocused(true)}
+                    onBlur={() => setIsFocused(false)}
+                    minRows={6}
+                    maxRows={17}
+                    className="w-full resize-none rounded-md border bg-transparent p-2 text-sm"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && e.ctrlKey) {
+                        e.preventDefault();
+                        handleArrowAction();
                       }
                     }}
-                  >
-                    {step === 1 ? "Cancelar" : "Voltar"}
-                  </Button>
-                  <Button
-                    type="button"
-                    onClick={handleArrowAction}
-                    disabled={
-                      (step === 2 && !canAdvanceFromStep2) || (step === 3 && !canFinish)
-                    }
-                  >
-                    {step === 3 ? "Concluir" : "Avançar"}
-                  </Button>
+                    disabled={isPending}
+                  />
                 </div>
-              </div>
-            </div>
+              )}
+            />
           </div>
-        </div>
-      )}
+        )}
+        {step === 2 && (
+          <AnalyticsStep isPending={isPending} analytics={analytics} setAnalytics={setAnalytics} />
+        )}
+        {step === 3 && (
+          componentEditIndex === null ? (
+            <ComponentsStep
+              isPending={isPending}
+              componentKeys={componentKeys}
+              componentsCfg={componentsCfg}
+              setComponentsCfg={setComponentsCfg}
+            />
+          ) : (
+            <ComponentPromptsStep
+              isPending={isPending}
+              orderedKeys={componentKeys.filter((k) => componentsCfg[k].enabled)}
+              index={componentEditIndex}
+              componentsCfg={componentsCfg}
+              setComponentsCfg={setComponentsCfg}
+            />
+          )
+        )}
+      </WizardModal>
     </Form>
   );
 };
