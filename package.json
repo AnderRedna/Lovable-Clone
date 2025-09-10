@@ -10,6 +10,7 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
+    "@clerk/localizations": "^3.25.0",
     "@clerk/nextjs": "^6.23.1",
     "@clerk/themes": "^2.2.52",
     "@e2b/code-interpreter": "^1.5.1",

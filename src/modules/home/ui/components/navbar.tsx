@@ -26,13 +26,13 @@ const Navbar = () => {
         </Link>
         <SignedOut>
           <div className="flex gap-2">
-            <SignUpButton>
+            {/* <SignUpButton>
               <Button variant="outline" size="sm">
-                Sign Up
+                Registrar
               </Button>
-            </SignUpButton>
+            </SignUpButton> */}
             <SignInButton>
-              <Button size="sm">Sign In</Button>
+              <Button size="sm">Entrar</Button>
             </SignInButton>
           </div>
         </SignedOut>

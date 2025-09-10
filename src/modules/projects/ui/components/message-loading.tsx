@@ -46,7 +46,7 @@ const MessageLoading = () => {
           width={18}
           className="shrink-0"
         />
-        <span className="text-sm font-medium">Lovable Clone</span>
+        <span className="text-sm font-medium">Landinfy</span>
       </div>
       <div className="pl-8.5 flex flex-col gap-y-4">
         <ShimmerMessages />

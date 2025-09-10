@@ -17,12 +17,12 @@ export default function HomePage() {
             className="hidden md:block"
           />
         </div>
-        <h1 className="text-2xl md:text-5xl font-bold text-center">
+        <h1 className="text-xl md:text-3xl font-bold text-center">
           Crie uma landing page profissional em segundos
         </h1>
-        {/* <p className="text-lg md:text-xl text-muted-foreground text-center">
+        <p className="text-lg md:text-xl text-muted-foreground text-center">
           Foco em conversão, design moderno e SEO.
-        </p> */}
+        </p>
 
         <div className="max-w-3xl mx-auto w-full">
           <ProjectForm />

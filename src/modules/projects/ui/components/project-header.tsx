@@ -49,26 +49,26 @@ const ProjectHeader = ({ projectId }: ProjectHeaderProps) => {
           <DropdownMenuItem asChild>
             <Link href="/">
               <ChevronLeftIcon />
-              <span>Go to Dashboard</span>
+              <span>Voltar para o Dashboard</span>
             </Link>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuSub>
             <DropdownMenuSubTrigger className="gap-2">
               <SunMoonIcon className="size-4 text-muted-foreground" />
-              <span>Appearance</span>
+              <span>Aparência</span>
             </DropdownMenuSubTrigger>
             <DropdownMenuPortal>
               <DropdownMenuSubContent>
                 <DropdownMenuRadioGroup value={theme} onValueChange={setTheme}>
                   <DropdownMenuRadioItem value="light">
-                    <span>Light</span>
+                    <span>Claro</span>
                   </DropdownMenuRadioItem>
                   <DropdownMenuRadioItem value="dark">
-                    <span>Dark</span>
+                    <span>Escuro</span>
                   </DropdownMenuRadioItem>
                   <DropdownMenuRadioItem value="system">
-                    <span>System</span>
+                    <span>Sistema</span>
                   </DropdownMenuRadioItem>
                 </DropdownMenuRadioGroup>
               </DropdownMenuSubContent>

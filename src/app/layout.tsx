@@ -1,4 +1,6 @@
 import { ClerkProvider } from "@clerk/nextjs";
+import { ptBR } from "@clerk/localizations";
+import { dark } from "@clerk/themes";
 import type { Metadata } from "next";
 import { ThemeProvider } from "next-themes";
 import { Geist, Geist_Mono } from "next/font/google";
@@ -42,13 +44,15 @@ export default function RootLayout({
   return (
     <ClerkProvider
       appearance={{
+        baseTheme: dark,
         variables: {
-          colorPrimary: "#c96342",
+          colorPrimary: "#22c55e", // green
         },
       }}
+      localization={ptBR}
     >
       <TRPCReactProvider>
-        <html lang="en" suppressHydrationWarning>
+        <html lang="pt-BR" suppressHydrationWarning>
           <body
             className={`${geistSans.variable} ${geistMono.variable} antialiased`}
           >

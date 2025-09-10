@@ -21,7 +21,8 @@ const UserControl = ({ showName }: UserControlProps) => {
           userButtonAvatarBox: "rounded-md! size-8!",
           userButtonTrigger: "rounded-md!",
         },
-        baseTheme: currentTheme === "dark" ? dark : undefined,
+        // Force dark theme for the user profile/settings modal and dropdown
+        baseTheme: dark,
       }}
     />
   );

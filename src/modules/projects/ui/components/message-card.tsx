@@ -86,7 +86,7 @@ const AssistantMessage = ({
           width={18}
           className="shrink-0"
         />
-        <span className="text-sm font-medium">Lovable Clone</span>
+        <span className="text-sm font-medium">Landinfy</span>
         <span className="text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
           {format(createdAt, "HH:mm 'on' MMM dd, yyyy")}
         </span>
