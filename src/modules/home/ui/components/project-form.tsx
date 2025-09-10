@@ -63,6 +63,12 @@ const ProjectForm = () => {
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     await createProject.mutateAsync({
       value: values.value,
+      customization: isCustomizing
+        ? {
+            analytics,
+            components: componentsCfg,
+          }
+        : undefined,
     });
   };
 

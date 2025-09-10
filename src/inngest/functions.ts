@@ -289,7 +289,35 @@ export const codeAgentFunction = inngest.createFunction(
       },
     });
 
-    const result = await network.run(event.data.value, { state });
+    // Compose an enriched instruction including customization
+    const customization = (event.data as any).customization as
+      | {
+          analytics?: { provider: string; code?: string };
+          components?: Record<string, { enabled: boolean; prompt?: string; border?: { enabled: boolean; prompt?: string } }>;
+        }
+      | undefined;
+
+    const selectedComponents = Object.entries(customization?.components || {})
+      .filter(([, cfg]) => cfg.enabled)
+      .map(([key, cfg]) => ({ key, prompt: cfg.prompt, borderPrompt: cfg.border?.prompt }));
+
+    const enrichedInstruction = [
+      event.data.value,
+      selectedComponents.length
+        ? `\n\nComponents to include (in order if applicable):\n${selectedComponents
+            .map(
+              (c, i) => ` ${i + 1}. ${c.key}${c.prompt ? `\n    prompt: ${c.prompt}` : ""}${c.borderPrompt ? `\n    border: ${c.borderPrompt}` : ""}`
+            )
+            .join("\n")}`
+        : "",
+      customization?.analytics && customization.analytics.provider !== "none"
+        ? `\n\nAnalytics: ${customization.analytics.provider}${customization.analytics.code ? ` (${customization.analytics.code.slice(0, 40)}...)` : ""}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("");
+
+    const result = await network.run(enrichedInstruction, { state });
     console.log("Completed network.run", result.state.data.summary ? "success" : "error");
 
     const fragmentTitleGenerator = createAgent({
@@ -338,6 +366,231 @@ export const codeAgentFunction = inngest.createFunction(
       !result.state.data.summary ||
       Object.keys(result.state.data.files || {}).length === 0;
 
+    // Best-effort analytics injection into <head>
+  if (!isError && customization?.analytics && customization?.analytics?.provider !== "none") {
+      await step.run("inject-analytics", async () => {
+        try {
+          const snippet = (customization?.analytics?.code || "").trim();
+          if (!snippet) return;
+          const files = result.state.data.files || {};
+          const candidates = Object.keys(files);
+          const preferredOrder = [
+            /app\/layout\.(tsx|jsx|ts|js)$/i,
+            /pages\/_document\.(tsx|jsx)$/i,
+            /index\.html$/i,
+          ];
+          let targetPath: string | undefined;
+          let updatedContent: string | undefined;
+
+          // Try preferred files first
+          for (const regex of preferredOrder) {
+            const found = candidates.find((p) => regex.test(p));
+            if (found) {
+              const content = files[found] as string;
+              if (content.includes("</head>")) {
+                updatedContent = content.replace(/<\/head>/i, `\n  {/* Analytics */}\n  ${snippet}\n</head>`);
+                targetPath = found;
+                break;
+              }
+            }
+          }
+
+          // Fallback: any file that has a head tag
+          if (!updatedContent) {
+            for (const p of candidates) {
+              const content = files[p] as string;
+              if (content.includes("</head>")) {
+                updatedContent = content.replace(/<\/head>/i, `\n  {/* Analytics */}\n  ${snippet}\n</head>`);
+                targetPath = p;
+                break;
+              }
+            }
+          }
+
+          const sandbox = await getSandbox(sandboxId);
+
+          // If still not found, create app/head.tsx
+          if (!updatedContent) {
+            targetPath = "app/head.tsx";
+            updatedContent = `export default function Head() {\n  return (\n    <>\n      {/* Analytics */}\n      ${snippet}\n    </>\n  );\n}\n`;
+          }
+
+          // Persist
+          if (targetPath && updatedContent) {
+            await sandbox.files.write(targetPath, updatedContent);
+            result.state.data.files[targetPath] = updatedContent;
+          }
+        } catch (err) {
+          console.warn("Analytics injection failed", err);
+        }
+      });
+    }
+
+    // Post-process: fix common export issues (versions, tailwind/shadcn, missing UI stubs)
+    if (!isError) {
+      await step.run("postprocess-project", async () => {
+        const sandbox = await getSandbox(sandboxId);
+
+        // Helper: safe read
+        const readSafe = async (p: string) => {
+          try {
+            return await sandbox.files.read(p);
+          } catch {
+            return undefined;
+          }
+        };
+
+        // 1) Sanitize package.json versions like ^latest or ~latest
+        try {
+          const pkgPath = "package.json";
+          const pkgRaw = await readSafe(pkgPath);
+          if (pkgRaw) {
+            const pkg = JSON.parse(pkgRaw);
+            const fix = (deps?: Record<string, string>) => {
+              if (!deps) return;
+              for (const k of Object.keys(deps)) {
+                const v = deps[k];
+                if (typeof v === "string" && (/^\^latest$/i.test(v) || /^~latest$/i.test(v))) {
+                  deps[k] = "latest";
+                }
+              }
+            };
+            fix(pkg.dependencies);
+            fix(pkg.devDependencies);
+            const nextRaw = JSON.stringify(pkg, null, 2) + "\n";
+            if (nextRaw !== pkgRaw) {
+              await sandbox.files.write(pkgPath, nextRaw);
+              result.state.data.files[pkgPath] = nextRaw;
+            }
+          }
+        } catch (e) {
+          console.warn("postprocess: package.json sanitize failed", e);
+        }
+
+        // 2) Ensure Tailwind config and shadcn tokens
+        try {
+          const twPaths = ["tailwind.config.ts", "tailwind.config.js"];
+          let twPath: string | undefined;
+          let twRaw: string | undefined;
+          for (const p of twPaths) {
+            const r = await readSafe(p);
+            if (r) {
+              twPath = p;
+              twRaw = r;
+              break;
+            }
+          }
+          const shadcnTw = `/** @type {import('tailwindcss').Config} */\nmodule.exports = {\n  darkMode: ['class'],\n  content: [\n    './app/**/*.{ts,tsx}',\n    './components/**/*.{ts,tsx}',\n  ],\n  theme: {\n    extend: {\n      colors: {\n        border: 'hsl(var(--border))',\n        input: 'hsl(var(--input))',\n        ring: 'hsl(var(--ring))',\n        background: 'hsl(var(--background))',\n        foreground: 'hsl(var(--foreground))',\n        primary: { DEFAULT: 'hsl(var(--primary))', foreground: 'hsl(var(--primary-foreground))' },\n        secondary: { DEFAULT: 'hsl(var(--secondary))', foreground: 'hsl(var(--secondary-foreground))' },\n        destructive: { DEFAULT: 'hsl(var(--destructive))', foreground: 'hsl(var(--destructive-foreground))' },\n        muted: { DEFAULT: 'hsl(var(--muted))', foreground: 'hsl(var(--muted-foreground))' },\n        accent: { DEFAULT: 'hsl(var(--accent))', foreground: 'hsl(var(--accent-foreground))' },\n        popover: { DEFAULT: 'hsl(var(--popover))', foreground: 'hsl(var(--popover-foreground))' },\n        card: { DEFAULT: 'hsl(var(--card))', foreground: 'hsl(var(--card-foreground))' },\n      },\n      borderRadius: {\n        lg: 'var(--radius)',\n        md: 'calc(var(--radius) - 2px)',\n        sm: 'calc(var(--radius) - 4px)',\n      },\n    },\n  },\n  plugins: [],\n}\n`;
+          const needsWrite = !twRaw || !/colors:\s*\{[\s\S]*border:/m.test(twRaw);
+          if (needsWrite) {
+            const pathToWrite = twPath || "tailwind.config.js";
+            await sandbox.files.write(pathToWrite, shadcnTw);
+            result.state.data.files[pathToWrite] = shadcnTw;
+          }
+        } catch (e) {
+          console.warn("postprocess: tailwind config ensure failed", e);
+        }
+
+        // 3) Ensure globals.css has CSS variables for shadcn
+        try {
+          const gPath = "app/globals.css";
+          const gRaw = await readSafe(gPath);
+          const baseCss = `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\n@layer base {\n  :root {\n    --background: 0 0% 100%;\n    --foreground: 222.2 84% 4.9%;\n    --card: 0 0% 100%;\n    --card-foreground: 222.2 84% 4.9%;\n    --popover: 0 0% 100%;\n    --popover-foreground: 222.2 84% 4.9%;\n    --primary: 221.2 83.2% 53.3%;\n    --primary-foreground: 210 40% 98%;\n    --secondary: 210 40% 96.1%;\n    --secondary-foreground: 222.2 47.4% 11.2%;\n    --muted: 210 40% 96.1%;\n    --muted-foreground: 215.4 16.3% 46.9%;\n    --accent: 210 40% 96.1%;\n    --accent-foreground: 222.2 47.4% 11.2%;\n    --destructive: 0 84.2% 60.2%;\n    --destructive-foreground: 210 40% 98%;\n    --border: 214.3 31.8% 91.4%;\n    --input: 214.3 31.8% 91.4%;\n    --ring: 221.2 83.2% 53.3%;\n    --radius: 0.5rem;\n  }\n  .dark {\n    --background: 222.2 84% 4.9%;\n    --foreground: 210 40% 98%;\n    --card: 222.2 84% 4.9%;\n    --card-foreground: 210 40% 98%;\n    --popover: 222.2 84% 4.9%;\n    --popover-foreground: 210 40% 98%;\n    --primary: 217.2 91.2% 59.8%;\n    --primary-foreground: 222.2 47.4% 11.2%;\n    --secondary: 217.2 32.6% 17.5%;\n    --secondary-foreground: 210 40% 98%;\n    --muted: 217.2 32.6% 17.5%;\n    --muted-foreground: 215 20.2% 65.1%;\n    --accent: 217.2 32.6% 17.5%;\n    --accent-foreground: 210 40% 98%;\n    --destructive: 0 62.8% 30.6%;\n    --destructive-foreground: 0 85.7% 97.3%;\n    --border: 217.2 32.6% 17.5%;\n    --input: 217.2 32.6% 17.5%;\n    --ring: 224.3 76.3% 48%;\n  }\n}\n`;
+          if (!gRaw || !/:root\s*\{[\s\S]*--background:/m.test(gRaw)) {
+            const out = gRaw ? `${baseCss}\n${gRaw}` : baseCss;
+            await sandbox.files.write(gPath, out);
+            result.state.data.files[gPath] = out;
+          }
+        } catch (e) {
+          console.warn("postprocess: globals.css ensure failed", e);
+        }
+
+        // 4) Ensure tsconfig paths for @/*
+        try {
+          const tsPath = "tsconfig.json";
+          const tsRaw = await readSafe(tsPath);
+          if (tsRaw) {
+            const ts = JSON.parse(tsRaw);
+            ts.compilerOptions = ts.compilerOptions || {};
+            ts.compilerOptions.baseUrl = ts.compilerOptions.baseUrl || ".";
+            ts.compilerOptions.paths = ts.compilerOptions.paths || {};
+            if (!ts.compilerOptions.paths["@/*"]) {
+              ts.compilerOptions.paths["@/*"] = ["./*"];
+            }
+            const next = JSON.stringify(ts, null, 2) + "\n";
+            if (next !== tsRaw) {
+              await sandbox.files.write(tsPath, next);
+              result.state.data.files[tsPath] = next;
+            }
+          }
+        } catch (e) {
+          console.warn("postprocess: tsconfig ensure failed", e);
+        }
+
+        // 5) Ensure lib/utils.ts with cn
+        try {
+          const utilPath = "lib/utils.ts";
+          const utilRaw = await readSafe(utilPath);
+          if (!utilRaw) {
+            const content = `import { type ClassValue } from 'clsx';\nimport { clsx } from 'clsx';\nimport { twMerge } from 'tailwind-merge';\n\nexport function cn(...inputs: ClassValue[]) {\n  return twMerge(clsx(inputs));\n}\n`;
+            await sandbox.files.write(utilPath, content);
+            result.state.data.files[utilPath] = content;
+          }
+        } catch (e) {
+          console.warn("postprocess: utils.ts ensure failed", e);
+        }
+
+        // 6) Stub missing UI components referenced in app/page.tsx
+        try {
+          const pagePath = "app/page.tsx";
+          const pageRaw = await readSafe(pagePath);
+          if (pageRaw) {
+            const importRegex = new RegExp(String.raw`import\s+([^'";]+)\s+from\s+["']@/components/ui/([^"']+)["'];?`, "g");
+            const lines = pageRaw.split("\n");
+            const imports = lines
+              .map((l) => l)
+              .join("\n")
+              .matchAll(importRegex);
+            const modules = new Map<string, string[]>();
+            for (const m of imports) {
+              const spec = m[1].trim(); // e.g., { A, B } or Default or Default, { A }
+              const mod = m[2].trim(); // e.g., accordion
+              const names: string[] = [];
+              const named = spec.match(/\{([^}]+)\}/);
+              if (named) {
+                for (const n of named[1].split(",")) names.push(n.trim().split(/\s+as\s+/)[0]);
+              }
+              const defMatch = spec.replace(named?.[0] || "", "").trim();
+              if (defMatch && defMatch !== ",") names.push("default:" + defMatch);
+              const prev = modules.get(mod) || [];
+              modules.set(mod, prev.concat(names));
+            }
+            for (const [mod, names] of modules) {
+              const target = `components/ui/${mod}.tsx`;
+              const exists = await readSafe(target);
+              if (!exists) {
+                const exports: string[] = [];
+                const defaultName = names.find((n) => n.startsWith("default:"))?.split(":")[1];
+                if (defaultName) {
+                  exports.push(`const ${defaultName} = (props: any) => <div {...props} />;\nexport default ${defaultName};`);
+                }
+                const named = names.filter((n) => !n.startsWith("default:"));
+                for (const n of named) {
+                  if (!n) continue;
+                  exports.push(`export const ${n} = (props: any) => <div {...props} />;`);
+                }
+                const stub = `"use client";\nimport React from 'react';\n${exports.join("\n")}\n`;
+                await sandbox.files.write(target, stub);
+                result.state.data.files[target] = stub;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("postprocess: stub ui components failed", e);
+        }
+      });
+    }
+
     const sandboxUrl = await step.run("get-sandbox-url", async () => {
       console.log("Running get-sandbox-url");
       const sandbox = await getSandbox(sandboxId);
@@ -346,7 +599,7 @@ export const codeAgentFunction = inngest.createFunction(
       return `https://${host}`;
     });
 
-    await step.run("save-result", async () => {
+  await step.run("save-result", async () => {
       console.log("Running save-result");
       if (isError) {
         const errorMessage = await prisma.message.create({
@@ -361,7 +614,7 @@ export const codeAgentFunction = inngest.createFunction(
         return errorMessage;
       }
 
-      const successMessage = await prisma.message.create({
+  const successMessage = await prisma.message.create({
         data: {
           projectId: event.data.projectId,
           content: parseAgentOutput(responseOutput),

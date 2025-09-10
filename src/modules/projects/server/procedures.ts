@@ -52,6 +52,27 @@ export const projectsRouter = createTRPCRouter({
           .string()
           .min(1, { message: "Value is required" })
           .max(10_000, { message: "Value is too long" }),
+        customization: z
+          .object({
+            analytics: z.object({
+              provider: z.enum(["none", "google-analytics", "clarity", "other"]),
+              code: z.string().optional(),
+            }),
+            components: z.record(
+              z.string(),
+              z.object({
+                enabled: z.boolean(),
+                prompt: z.string().optional(),
+                border: z
+                  .object({
+                    enabled: z.boolean(),
+                    prompt: z.string().optional(),
+                  })
+                  .optional(),
+              })
+            ),
+          })
+          .optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -95,6 +116,7 @@ export const projectsRouter = createTRPCRouter({
         data: {
           value: input.value,
           projectId: createdProject.id,
+          customization: input.customization,
         },
       });
   console.log("Inngest event sent (projects.create)", sendResult);
