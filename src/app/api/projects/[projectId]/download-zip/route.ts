@@ -41,10 +41,18 @@ export async function GET(
     let match;
     while ((match = importRegex.exec(allFilesContent)) !== null) {
       const packageName = match[1];
-      // Skip relative imports and built-ins
-      if (!packageName.startsWith('.') && !packageName.startsWith('@/') && !['react', 'next'].includes(packageName)) {
-        detectedDeps.add(packageName);
+      // Skip relative imports, alias, built-ins, and Next.js subpath imports like next/link, next/image
+      if (
+        packageName.startsWith('.') ||
+        packageName.startsWith('~/') ||
+        packageName.startsWith('@/') ||
+        packageName === 'react' ||
+        packageName === 'next' ||
+        packageName.startsWith('next/')
+      ) {
+        continue;
       }
+      detectedDeps.add(packageName);
     }
 
     // Base dependencies
@@ -60,7 +68,7 @@ export async function GET(
 
     // Add detected dependencies
     const allDeps: Record<string, string> = { ...baseDeps };
-    detectedDeps.forEach(dep => {
+  detectedDeps.forEach(dep => {
       // Map common packages to versions
       const versionMap: Record<string, string> = {
         'lucide-react': '^0.469.0',
@@ -77,7 +85,12 @@ export async function GET(
       }
     });
 
-    // Sanitize any accidental ^latest or ~latest
+    // Remove any accidental next/* pseudo-packages and sanitize accidental ^latest or ~latest
+    Object.keys(allDeps).forEach((k) => {
+      if (k.startsWith('next/')) {
+        delete allDeps[k];
+      }
+    });
     Object.keys(allDeps).forEach((k) => {
       const v = String(allDeps[k] ?? '').trim();
       if (/^[~^]\s*latest$/i.test(v)) {

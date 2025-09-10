@@ -683,7 +683,7 @@ export const codeAgentFunction = inngest.createFunction(
           console.warn("postprocess: components.json ensure failed", e);
         }
 
-        // 8) Defensive: backgrounds shouldn't block clicks.
+        // 8) Defensive: backgrounds shouldn't block clicks (don't force z-index to avoid hiding effects).
         try {
           const entries = Object.entries(result.state.data.files);
           for (const [path, content] of entries) {
@@ -695,11 +695,6 @@ export const codeAgentFunction = inngest.createFunction(
               (m, p1, p2) =>
                 p1.includes("pointer-events-none") ? m : `${p1} pointer-events-none select-none${p2}`
             );
-            // Ensure such bg containers go behind content
-            next = next.replace(
-              /(className=\"[^\"]*\babsolute\b[^\"]*)(\")/g,
-              (m, p1, p2) => (p1.includes("-z-10") ? m : `${p1} -z-10${p2}`)
-            );
             if (next !== content) {
               await sandbox.files.write(path, next);
               result.state.data.files[path] = next;
@@ -707,6 +702,69 @@ export const codeAgentFunction = inngest.createFunction(
           }
         } catch (e) {
           console.warn("postprocess: background safety patch failed", e);
+        }
+
+        // 9) Ensure runtime deps for animations exist and are installed in sandbox
+        try {
+          const entries = Object.entries(result.state.data.files);
+          let needsFramer = false;
+          let needsSlot = false;
+          for (const [path, content] of entries) {
+            if (!/\.(tsx|ts|jsx|js)$/.test(path)) continue;
+            if (typeof content !== "string") continue;
+            if (/from\s+['"]framer-motion['"]/m.test(content)) needsFramer = true;
+            if (/from\s+['"]@radix-ui\/react-slot['"]/m.test(content)) needsSlot = true;
+          }
+          const pkgPath = "package.json";
+          const pkgRaw = await readSafe(pkgPath);
+          if (pkgRaw) {
+            const pkg = JSON.parse(pkgRaw);
+            pkg.dependencies = pkg.dependencies || {};
+            let changed = false;
+            if (needsFramer && !pkg.dependencies["framer-motion"]) {
+              pkg.dependencies["framer-motion"] = "latest";
+              changed = true;
+            }
+            if (needsSlot && !pkg.dependencies["@radix-ui/react-slot"]) {
+              pkg.dependencies["@radix-ui/react-slot"] = "latest";
+              changed = true;
+            }
+            if (changed) {
+              const nextRaw = JSON.stringify(pkg, null, 2) + "\n";
+              await sandbox.files.write(pkgPath, nextRaw);
+              result.state.data.files[pkgPath] = nextRaw;
+              // Install deps in sandbox so preview can run animations
+              try {
+                await sandbox.commands.run("npm i --no-audit --no-fund");
+              } catch (e) {
+                console.warn("sandbox npm install failed", e);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("postprocess: ensure animation deps failed", e);
+        }
+
+        // 10) Fallback demo page: if BackgroundPaths exists but no page uses it, render it on /
+        try {
+          const bgComp = await readSafe("components/ui/background-paths.tsx");
+          if (bgComp) {
+            const pagePath = "app/page.tsx";
+            const pageRaw = await readSafe(pagePath);
+            const usesBg = pageRaw && /BackgroundPaths/.test(pageRaw);
+            if (!pageRaw || !usesBg) {
+              const demo = `import { BackgroundPaths } from '@/components/ui/background-paths';
+
+export default function Page() {
+  return <BackgroundPaths title=\"Background Paths\" />;
+}
+`;
+              await sandbox.files.write(pagePath, demo);
+              result.state.data.files[pagePath] = demo;
+            }
+          }
+        } catch (e) {
+          console.warn("postprocess: fallback BackgroundPaths demo failed", e);
         }
       });
     }
