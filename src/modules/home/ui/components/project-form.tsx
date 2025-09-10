@@ -237,7 +237,7 @@ const ProjectForm = () => {
           <div className="flex gap-x-2 items-end justify-between pt-2">
             <Button
               variant={isCustomizing ? "default" : "outline"}
-              className="h-6 px-2 text-xs"
+              className="h-6 px-2 text-xs border-2 border-green-700"
               type="button"
               onClick={() => {
                 const next = !isCustomizing;
