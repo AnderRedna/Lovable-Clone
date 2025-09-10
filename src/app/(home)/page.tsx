@@ -6,8 +6,8 @@ import { ProjectsList } from "@/modules/home/ui/components/projects-list";
 
 export default function HomePage() {
   return (
-    <div className="flex flex-col max-w-5xl mx-auto w-full">
-      <section className="space-y-6 py-[16vh] 2xl:py-48">
+    <div className="flex flex-col max-w-5xl mx-auto w-full min-h-full">
+      <section className="space-y-6 py-16 md:py-[16vh] 2xl:py-48 flex-shrink-0">
         <div className="flex flex-col items-center">
           <Image
             src="/logo.svg"
@@ -20,9 +20,9 @@ export default function HomePage() {
         <h1 className="text-2xl md:text-5xl font-bold text-center">
           Crie uma landing page profissional em segundos
         </h1>
-        <p className="text-lg md:text-xl text-muted-foreground text-center">
+        {/* <p className="text-lg md:text-xl text-muted-foreground text-center">
           Foco em conversão, design moderno e SEO.
-        </p>
+        </p> */}
 
         <div className="max-w-3xl mx-auto w-full">
           <ProjectForm />
@@ -30,7 +30,9 @@ export default function HomePage() {
       </section>
 
       <SignedIn>
-        <ProjectsList />
+        <div className="mt-8 mb-8">
+          <ProjectsList />
+        </div>
       </SignedIn>
     </div>
   );

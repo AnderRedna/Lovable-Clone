@@ -1,51 +1,51 @@
 export const PROJECT_TEMPLATES = [
   {
-    emoji: "🎬",
-    title: "Build a Netflix clone",
+    emoji: "🚀",
+    title: "Build a SaaS landing page",
     prompt:
-      "Build a Netflix-style homepage with a hero banner (use a nice, dark-mode compatible gradient here), movie sections, responsive cards, and a modal for viewing details using mock data and local state. Use dark mode.",
+      "Create a SaaS landing page with a hero section featuring a compelling headline, call-to-action button, feature highlights, testimonials, and a footer. Use modern design with gradients, icons, and responsive layout.",
   },
   {
-    emoji: "📦",
-    title: "Build an admin dashboard",
+    emoji: "�",
+    title: "Build a marketing landing page",
     prompt:
-      "Create an admin dashboard with a sidebar, stat cards, a chart placeholder, and a basic table with filter and pagination using local state. Use clear visual grouping and balance in your design for a modern, professional look.",
+      "Design a marketing landing page with a hero banner, benefit sections, social proof, email signup form, and a clean footer. Focus on persuasive copy, high-contrast colors, and mobile optimization.",
   },
   {
-    emoji: "📋",
-    title: "Build a kanban board",
+    emoji: "�",
+    title: "Build a fake door landing page",
     prompt:
-      "Build a kanban board with drag-and-drop using react-beautiful-dnd and support for adding and removing tasks with local state. Use consistent spacing, column widths, and hover effects for a polished UI.",
+      "Build a fake door landing page with a teaser headline, countdown timer, email capture form, and social media links. Use urgency elements like limited spots and a sleek, minimalist design.",
   },
   {
-    emoji: "🗂️",
-    title: "Build a file manager",
+    emoji: "�",
+    title: "Build a business landing page",
     prompt:
-      "Build a file manager with folder list, file grid, and options to rename or delete items using mock data and local state. Focus on spacing, clear icons, and visual distinction between folders and files.",
+      "Create a business landing page with sections for services, about us, client logos, contact form, and a navigation bar. Emphasize professionalism with balanced spacing, typography, and call-to-action placements.",
   },
   {
-    emoji: "📺",
-    title: "Build a YouTube clone",
+    emoji: "🎯",
+    title: "Build a product launch landing page",
     prompt:
-      "Build a YouTube-style homepage with mock video thumbnails, a category sidebar, and a modal preview with title and description using local state. Ensure clean alignment and a well-organized grid layout.",
+      "Design a product launch landing page with a video hero, feature grid, pricing tiers, and a newsletter signup. Incorporate animations, bold visuals, and a conversion-focused layout.",
   },
   {
-    emoji: "🛍️",
-    title: "Build a store page",
+    emoji: "🌟",
+    title: "Build a startup landing page",
     prompt:
-      "Build a store page with category filters, a product grid, and local cart logic to add and remove items. Focus on clear typography, spacing, and button states for a great e-commerce UI.",
+      "Build a startup landing page with a problem-solution section, team intro, roadmap, and investor pitch. Use vibrant colors, icons, and a story-driven narrative for engagement.",
   },
   {
-    emoji: "🏡",
-    title: "Build an Airbnb clone",
+    emoji: "📱",
+    title: "Build an app landing page",
     prompt:
-      "Build an Airbnb-style listings grid with mock data, filter sidebar, and a modal with property details using local state. Use card spacing, soft shadows, and clean layout for a welcoming design.",
+      "Create an app landing page with screenshots, download buttons, user reviews, and FAQs. Focus on app store badges, responsive images, and a user-centric design.",
   },
   {
-    emoji: "🎵",
-    title: "Build a Spotify clone",
+    emoji: "🛒",
+    title: "Build an e-commerce landing page",
     prompt:
-      "Build a Spotify-style music player with a sidebar for playlists, a main area for song details, and playback controls. Use local state for managing playback and song selection. Prioritize layout balance and intuitive control placement for a smooth user experience. Use dark mode.",
+      "Design an e-commerce landing page with product showcases, shopping cart preview, customer testimonials, and a secure checkout teaser. Prioritize trust signals and seamless navigation.",
   },
 ] as const;
 
