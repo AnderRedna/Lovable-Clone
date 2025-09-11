@@ -19,10 +19,7 @@ interface MessageFormProps {
 }
 
 const formSchema = z.object({
-  value: z
-    .string()
-    .min(1, { message: "Value is required" })
-    .max(10_000, { message: "Value is too long" }),
+  value: z.string().min(1, { message: "Value is required" }),
 });
 
 const MessageForm = ({ projectId }: MessageFormProps) => {

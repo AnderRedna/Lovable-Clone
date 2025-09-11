@@ -19,10 +19,7 @@ import { useRouter } from "next/navigation";
 import { WizardModal, AnalyticsStep, ComponentsStep, ComponentPromptsStep } from "./project-form/index";
 
 const formSchema = z.object({
-  value: z
-    .string()
-    .min(1, { message: "Value is required" })
-    .max(10_000, { message: "Value is too long" }),
+  value: z.string().min(1, { message: "Value is required" }),
 });
 
 const ProjectForm = () => {

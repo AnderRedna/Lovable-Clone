@@ -35,10 +35,7 @@ export const messagesRouter = createTRPCRouter({
   create: protectedProcedure
     .input(
       z.object({
-        value: z
-          .string()
-          .min(1, { message: "Value is required" })
-          .max(10_000, { message: "Value is too long" }),
+        value: z.string().min(1, { message: "Value is required" }),
         projectId: z.string().min(1, { message: "projectId is required" }),
       })
     )
@@ -87,8 +84,18 @@ export const messagesRouter = createTRPCRouter({
         },
       });
 
+  // Decide whether to create or edit based on existing fragments
+  const hasFragment = await prisma.message.findFirst({
+        where: {
+          projectId: existingProject.id,
+          role: "ASSISTANT",
+          type: "RESULT",
+          fragment: { isNot: null },
+        },
+      });
+  const eventName = hasFragment ? "code-agent/edit" : "code-agent/run";
   const sendResult = await inngest.send({
-        name: "code-agent/run",
+        name: eventName,
         data: {
           value: input.value,
           projectId: existingProject.id,

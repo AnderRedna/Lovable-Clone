@@ -23,6 +23,8 @@ import { SANDBOX_TIMEOUT_IN_MS } from "@/constants";
 interface AgentState {
   summary: string;
   files: FileCollection;
+  // Optional list of files allowed to be edited in EDIT mode
+  allowedPaths?: string[];
 }
 
 // Guard: detect default Next.js starter template markers to avoid accidental overwrite
@@ -210,8 +212,13 @@ export const codeAgentFunction = inngest.createFunction(
                 try {
                   const updatedFiles = network.state.data.files || {};
                   const sandbox = await getSandbox(sandboxId);
+                  const guard = new Set(network.state.data.allowedPaths || []);
 
                   for (const file of files) {
+                    if (guard.size > 0 && !guard.has(file.path)) {
+                      console.warn(`[edit-guard] blocked write to ${file.path}`);
+                      continue;
+                    }
                     // Template Guard: don't overwrite main page with Next.js starter content
                     if (
                       /app\/page\.(tsx|jsx|ts|js)$/i.test(file.path) &&
@@ -868,6 +875,317 @@ export default function Page() {
       return successMessage;
     });
     console.log("Completed code-agent function");
+    return {
+      url: sandboxUrl,
+      title: "Fragment",
+      files: result.state.data.files,
+      summary: result.state.data.summary,
+    };
+  }
+);
+
+export const codeAgentEditFunction = inngest.createFunction(
+  { id: "code-agent-edit" },
+  { event: "code-agent/edit" },
+  async ({ event, step }) => {
+    console.log("Starting code-agent-edit", JSON.stringify(event.data));
+    const sandboxId = await step.run("get-sandbox-id", async () => {
+      const template =
+        process.env.E2B_TEMPLATE_ID ||
+        process.env.E2B_TEMPLATE_NAME ||
+        "lovable-clone-nextjs-sg-0206";
+      const sandbox = await Sandbox.create(template);
+      await sandbox.setTimeout(SANDBOX_TIMEOUT_IN_MS);
+      return sandbox.sandboxId;
+    });
+
+    // Load last fragment files for this project
+    const existing = await step.run("load-existing-files", async () => {
+      const last = await prisma.message.findFirst({
+        where: {
+          projectId: (event.data as any).projectId,
+          role: "ASSISTANT",
+          type: "RESULT",
+          fragment: { isNot: null },
+        },
+        include: { fragment: true },
+        orderBy: { createdAt: "desc" },
+      });
+      const files = (last as any)?.fragment?.files as FileCollection | undefined;
+      return files || {};
+    });
+
+    // Hydrate sandbox with existing files
+    await step.run("hydrate-sandbox", async () => {
+      const sandbox = await getSandbox(sandboxId);
+      for (const [path, content] of Object.entries(existing)) {
+        try {
+          await sandbox.files.write(path, content as string);
+        } catch (e) {
+          console.warn("hydrate write failed", path, e);
+        }
+      }
+    });
+
+    const previousMessages: Message[] = [];
+    const state = createState<AgentState>(
+      {
+        summary: "",
+        files: { ...existing },
+        allowedPaths: [],
+      },
+      { messages: previousMessages }
+    );
+
+    // Impact analyzer to select minimal set of files
+    const impactAnalyzer = createAgent<AgentState>({
+      name: "impact-analyzer",
+      description: "Select minimal impacted files for the change request",
+      system:
+        "You are an impact analyzer. Given a change request and a file map, return a compact JSON array of file paths to modify. Rules:\n- Select the smallest set of files that must change to implement the request.\n- Do not include files that do not need edits.\n- Output ONLY a JSON array of strings (no markdown, no commentary).",
+      model: azureOpenAICompat({
+        endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
+        apiKey: process.env.AZURE_OPENAI_API_KEY!,
+        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
+        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
+        defaultParameters: { temperature: 0.1 },
+      }),
+    });
+
+    const fileIndex = Object.keys(existing).slice(0, 2000);
+    const analyzerInput = JSON.stringify({
+      request: (event.data as any).value,
+      files: fileIndex,
+    });
+    const { output: impactOutput } = await impactAnalyzer.run(analyzerInput);
+    let allowedPaths: string[] = [];
+    try {
+      const text = impactOutput
+        .filter((m: any) => m.type === "text")
+        .map((m: any) => (m as any).content)
+        .join("");
+      const parsed = JSON.parse(Array.isArray(text) ? (text as any).join("") : text);
+      if (Array.isArray(parsed)) {
+        allowedPaths = parsed.filter((p) => typeof p === "string");
+      }
+    } catch (e) {
+      console.warn("impact parse failed, using heuristic fallback", e);
+    }
+
+    if (allowedPaths.length === 0) {
+      allowedPaths = fileIndex.filter((p) => /\.(tsx|ts|jsx|js)$/.test(p)).slice(0, 5);
+    }
+    state.data.allowedPaths = allowedPaths;
+
+    // Editor agent reusing PROMPT, but informing EDIT MODE constraints
+    const editorAgent = createAgent<AgentState>({
+      name: "code-editor",
+      description: "Edit only the allowed files for the requested change",
+      system:
+        `${PROMPT}\n\nIMPORTANT:\n- You are in EDIT MODE.\n- Only modify the following files:\n${allowedPaths
+          .map((p) => `- ${p}`)
+          .join("\n")}\n- Do NOT create new files unless strictly necessary; prefer editing existing allowed files.\n- Keep the rest of the project unchanged.`,
+      model: azureOpenAICompat({
+        endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
+        apiKey: process.env.AZURE_OPENAI_API_KEY!,
+        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
+        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
+        defaultParameters: { temperature: 0.1 },
+      }),
+      tools: [
+        // Reuse tools from main agent by redefining here
+        createTool({
+          name: "terminal",
+          description: "Use the terminal to run commands",
+          parameters: z.object({ command: z.string() }),
+          handler: async ({ command }, { step }) => {
+            return await step?.run("terminal", async () => {
+              const buffers = { stdout: "", stderr: "" };
+              try {
+                const sandbox = await getSandbox(sandboxId);
+                const result = await sandbox.commands.run(command, {
+                  onStdout: (d: string) => {
+                    buffers.stdout += d;
+                  },
+                  onStderr: (d: string) => {
+                    buffers.stderr += d;
+                  },
+                });
+                return result.stdout;
+              } catch (error) {
+                return `command failed: ${error}\nstdOut: ${buffers.stdout}\nstdError: ${buffers.stderr}`;
+              }
+            });
+          },
+        }),
+        createTool({
+          name: "createOrUpdateFiles",
+          description: "Create or update files in the sandbox",
+          parameters: z.object({
+            files: z.array(z.object({ path: z.string(), content: z.string() })),
+          }),
+          handler: async ({ files }, { step, network }) => {
+            const newFiles = await step?.run("createOrUpdateFiles", async () => {
+              try {
+                const updatedFiles = network.state.data.files || {};
+                const sandbox = await getSandbox(sandboxId);
+                const guard = new Set(network.state.data.allowedPaths || []);
+                for (const file of files) {
+                  if (guard.size > 0 && !guard.has(file.path)) {
+                    console.warn(`[edit-guard] blocked write to ${file.path}`);
+                    continue;
+                  }
+                  if (
+                    /app\/page\.(tsx|jsx|ts|js)$/i.test(file.path) &&
+                    DEFAULT_NEXT_TEMPLATE_RE.test(file.content)
+                  ) {
+                    console.warn(
+                      "Template guard: skipping overwrite of app/page.* with Next.js starter content"
+                    );
+                    continue;
+                  }
+                  await sandbox.files.write(file.path, file.content);
+                  updatedFiles[file.path] = file.content;
+                }
+                return updatedFiles;
+              } catch (error) {
+                return "Error: " + error;
+              }
+            });
+            if (typeof newFiles === "object") {
+              (network as any).state.data.files = newFiles as any;
+            }
+          },
+        }),
+        createTool({
+          name: "readFiles",
+          description: "Read files from the sandbox",
+          parameters: z.object({ files: z.array(z.string()) }),
+          handler: async ({ files }, { step }) => {
+            return await step?.run("readFiles", async () => {
+              try {
+                const sandbox = await getSandbox(sandboxId);
+                const contents: any[] = [];
+                for (const f of files) {
+                  const content = await sandbox.files.read(f);
+                  contents.push({ path: f, content });
+                }
+                return JSON.stringify(contents);
+              } catch (error) {
+                return "Error: " + error;
+              }
+            });
+          },
+        }),
+      ],
+      lifecycle: {
+        onResponse: async ({ result, network }) => {
+          logAssistantTexts("code-editor", result.output);
+          const lastAssistantTextMessageText = lastAssistantTextMessageContent(result);
+          if (lastAssistantTextMessageText && network) {
+            if (lastAssistantTextMessageText.includes("<task_summary>")) {
+              network.state.data.summary = lastAssistantTextMessageText;
+            }
+          }
+          return result;
+        },
+      },
+    });
+
+    const editorNetwork = createNetwork<AgentState>({
+      name: "coding-editor-network",
+      agents: [editorAgent],
+      maxIter: 12,
+      defaultState: state,
+      router: async ({ network }) => {
+        const summary = network.state.data.summary;
+        if (summary) return;
+        return editorAgent;
+      },
+    });
+
+    const enrichedInstruction = [
+      (event.data as any).value,
+      `Only edit: ${allowedPaths.join(", ")}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    const result = await editorNetwork.run(enrichedInstruction, { state });
+
+    const fragmentTitleGenerator = createAgent({
+      name: "fragment-title-generator",
+      description: "A fragment title generator",
+      system: FRAGMENT_TITLE_PROMPT,
+      model: azureOpenAICompat({
+        endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
+        apiKey: process.env.AZURE_OPENAI_API_KEY!,
+        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
+        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
+        defaultParameters: { temperature: 0.1 },
+      }),
+    });
+
+    const responseGenerator = createAgent({
+      name: "response-generator",
+      description: "A response generator",
+      system: RESPONSE_PROMPT,
+      model: azureOpenAICompat({
+        endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
+        apiKey: process.env.AZURE_OPENAI_API_KEY!,
+        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
+        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
+        defaultParameters: { temperature: 0.1 },
+      }),
+    });
+
+    const { output: fragmentTitleOutput } = await fragmentTitleGenerator.run(
+      result.state.data.summary
+    );
+    const { output: responseOutput } = await responseGenerator.run(
+      result.state.data.summary
+    );
+
+    const isError =
+      !result.state.data.summary ||
+      Object.keys(result.state.data.files || {}).length === 0;
+
+    const sandboxUrl = await step.run("get-sandbox-url", async () => {
+      const sandbox = await getSandbox(sandboxId);
+      const host = sandbox.getHost(3000);
+      return `https://${host}`;
+    });
+
+    await step.run("save-result", async () => {
+      if (isError) {
+        await prisma.message.create({
+          data: {
+            projectId: (event.data as any).projectId,
+            content: "Something went wrong. Please try again.",
+            role: "ASSISTANT",
+            type: "ERROR",
+          },
+        });
+        return;
+      }
+
+      await prisma.message.create({
+        data: {
+          projectId: (event.data as any).projectId,
+          content: parseAgentOutput(responseOutput),
+          role: "ASSISTANT",
+          type: "RESULT",
+          fragment: {
+            create: {
+              sandboxUrl,
+              title: parseAgentOutput(fragmentTitleOutput),
+              files: result.state.data.files,
+            },
+          },
+        },
+      });
+    });
+
     return {
       url: sandboxUrl,
       title: "Fragment",
