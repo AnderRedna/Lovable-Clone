@@ -19,6 +19,7 @@ import { FileCollection } from "@/types";
 import { FragmentWeb } from "../components/fragment-web";
 import { MessagesContainer } from "../components/messages-container";
 import { ProjectHeader } from "../components/project-header";
+import FeedbackForm from "../components/feedback-form";
 import { ErrorBoundary } from "react-error-boundary";
 
 interface ProjectViewProps {
@@ -41,12 +42,12 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
           className="flex flex-col min-h-0"
         >
           <ErrorBoundary fallback={<p>Error...</p>}>
-            <Suspense fallback={<p>Loading project...</p>}>
+            <Suspense fallback={<FeedbackForm />}>
               <ProjectHeader projectId={projectId} />
             </Suspense>
           </ErrorBoundary>
           <ErrorBoundary fallback={<p>Error...</p>}>
-            <Suspense fallback={<p>Loading messages...</p>}>
+            <Suspense fallback={<FeedbackForm />}>
               <MessagesContainer
                 projectId={projectId}
                 activeFragment={activeFragment}
@@ -89,7 +90,7 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
               </div>
             </div>
             <TabsContent value="preview">
-              {!!activeFragment && <FragmentWeb data={activeFragment} />}
+              {activeFragment ? <FragmentWeb data={activeFragment} /> : <FeedbackForm />}
             </TabsContent>
             <TabsContent value="code" className="min-h-0">
               {!!activeFragment?.files && (
