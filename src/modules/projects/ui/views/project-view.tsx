@@ -21,6 +21,7 @@ import { MessagesContainer } from "../components/messages-container";
 import { ProjectHeader } from "../components/project-header";
 import FeedbackForm from "../components/feedback-form";
 import { ErrorBoundary } from "react-error-boundary";
+import VibeCoderChallenge from "../components/vibe-coder";
 
 interface ProjectViewProps {
   projectId: string;
@@ -93,8 +94,10 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
               {activeFragment ? <FragmentWeb data={activeFragment} /> : <FeedbackForm />}
             </TabsContent>
             <TabsContent value="code" className="min-h-0">
-              {!!activeFragment?.files && (
+              {activeFragment?.files ? (
                 <FileExplorer files={activeFragment.files as FileCollection} projectId={projectId} />
+              ) : (
+                <VibeCoderChallenge />
               )}
             </TabsContent>
           </Tabs>
