@@ -121,13 +121,13 @@ const FileExplorer = ({ files, projectId }: FileExplorerProps) => {
         .writeText(allFiles[selectedFile])
         .then(() => {
           setCopied(true);
-          toast.success("Copied to clipboard");
+          toast.success("Copiado para a área de transferência");
           setTimeout(() => {
             setCopied(false);
           }, 2000);
         })
         .catch(() => {
-          toast.error("Something went wrong. Please try again.");
+          toast.error("Algo deu errado. Por favor, tente novamente.");
         });
     }
   };

@@ -25,6 +25,10 @@ interface AgentState {
   files: FileCollection;
 }
 
+// Guard: detect default Next.js starter template markers to avoid accidental overwrite
+const DEFAULT_NEXT_TEMPLATE_RE =
+  /(Next\.js logo|\/vercel\.svg|\/next\.svg|Read our docs|Go to nextjs\.org)/i;
+
 // Loga todo texto do assistente em um conjunto de mensagens
 function logAssistantTexts(tag: string, messages: Message[]) {
   for (const m of messages) {
@@ -208,6 +212,17 @@ export const codeAgentFunction = inngest.createFunction(
                   const sandbox = await getSandbox(sandboxId);
 
                   for (const file of files) {
+                    // Template Guard: don't overwrite main page with Next.js starter content
+                    if (
+                      /app\/page\.(tsx|jsx|ts|js)$/i.test(file.path) &&
+                      DEFAULT_NEXT_TEMPLATE_RE.test(file.content)
+                    ) {
+                      console.warn(
+                        "Template guard: skipping overwrite of app/page.* with Next.js starter content"
+                      );
+                      continue;
+                    }
+
                     await sandbox.files.write(file.path, file.content);
                     updatedFiles[file.path] = file.content;
                   }
@@ -455,6 +470,28 @@ export const codeAgentFunction = inngest.createFunction(
           }
         };
 
+        // 0) Ensure 'use client' directive is the very first line when present
+        try {
+          const moveUseClientToTop = (src: string) => {
+            if (!/['"]use client['"]/m.test(src)) return src;
+            // Remove all occurrences of the directive and re-insert at the top
+            const withoutAll = src.replace(/^[\s;]*["']use client["']\s*;?\s*/gm, "");
+            return `"use client";\n` + withoutAll.replace(/^\s+/, "");
+          };
+          const entries = Object.entries(result.state.data.files || {});
+          for (const [path, content] of entries) {
+            if (typeof content !== "string") continue;
+            if (!/\.(tsx|jsx)$/i.test(path)) continue;
+            const fixed = moveUseClientToTop(content);
+            if (fixed !== content) {
+              await sandbox.files.write(path, fixed);
+              result.state.data.files[path] = fixed;
+            }
+          }
+        } catch (e) {
+          console.warn("postprocess: move 'use client' to top failed", e);
+        }
+
         // 1) Sanitize package.json: versions like ^latest/~latest, invalid package names, fix next-themes
         try {
           const pkgPath = "package.json";
@@ -530,6 +567,26 @@ export const codeAgentFunction = inngest.createFunction(
           }
         } catch (e) {
           console.warn("postprocess: tailwind config ensure failed", e);
+        }
+
+        // 2.5) Ensure next.config images allows picsum.photos
+        try {
+          const jsPath = "next.config.js";
+          const mjsPath = "next.config.mjs";
+          const jsRaw = await readSafe(jsPath);
+          const mjsRaw = await readSafe(mjsPath);
+
+          if (!jsRaw && !mjsRaw) {
+            const cfg = `/** @type {import('next').NextConfig} */\nconst nextConfig = {\n  images: { domains: ['picsum.photos'] },\n};\nmodule.exports = nextConfig;\n`;
+            await sandbox.files.write(jsPath, cfg);
+            result.state.data.files[jsPath] = cfg;
+          } else if (jsRaw && !/picsum\.photos/.test(jsRaw)) {
+            const patched = `${jsRaw}\n// Ensure picsum.photos domain for next/image\nmodule.exports.images = module.exports.images || {};\nmodule.exports.images.domains = Array.from(new Set([...(module.exports.images.domains || []), 'picsum.photos']));\n`;
+            await sandbox.files.write(jsPath, patched);
+            result.state.data.files[jsPath] = patched;
+          }
+        } catch (e) {
+          console.warn("postprocess: ensure next.config images failed", e);
         }
 
         // 3) Ensure globals.css has CSS variables for shadcn
@@ -745,22 +802,22 @@ export const codeAgentFunction = inngest.createFunction(
           console.warn("postprocess: ensure animation deps failed", e);
         }
 
-        // 10) Fallback demo page: if BackgroundPaths exists but no page uses it, render it on /
+        // 10) Fallback demo page: do NOT overwrite app/page.tsx; create demo route only if root page is missing
         try {
           const bgComp = await readSafe("components/ui/background-paths.tsx");
           if (bgComp) {
             const pagePath = "app/page.tsx";
             const pageRaw = await readSafe(pagePath);
-            const usesBg = pageRaw && /BackgroundPaths/.test(pageRaw);
-            if (!pageRaw || !usesBg) {
+            if (!pageRaw) {
+              const demoPath = "app/demos/background-paths/page.tsx";
               const demo = `import { BackgroundPaths } from '@/components/ui/background-paths';
 
 export default function Page() {
-  return <BackgroundPaths title=\"Background Paths\" />;
+  return <BackgroundPaths title="Background Paths" />;
 }
 `;
-              await sandbox.files.write(pagePath, demo);
-              result.state.data.files[pagePath] = demo;
+              await sandbox.files.write(demoPath, demo);
+              result.state.data.files[demoPath] = demo;
             }
           }
         } catch (e) {

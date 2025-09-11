@@ -22,13 +22,13 @@ const FragmentWeb = ({ data }: FragmentWebProps) => {
       .writeText(data.sandboxUrl)
       .then(() => {
         setCopied(true);
-        toast.success("Link copied");
+        toast.success("Copiado para a área de transferência");
         setTimeout(() => {
           setCopied(false);
         }, 2000);
       })
       .catch(() => {
-        toast.error("Something went wrong. Please try again.");
+        toast.error("Algo deu errado. Por favor, tente novamente.");
       });
   };
 
