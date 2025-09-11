@@ -72,7 +72,7 @@ export const codeAgentFunction = inngest.createFunction(
   { id: "code-agent" },
   { event: "code-agent/run" },
   async ({ event, step }) => {
-    console.log("Starting code-agent function", event.data);
+    console.log("Starting code-agent function", JSON.stringify(event.data));
     const sandboxId = await step.run("get-sandbox-id", async () => {
       console.log("Running get-sandbox-id");
       const template =

@@ -22,7 +22,7 @@ const Navbar = () => {
       <div className="max-w-5xl mx-auto w-full flex justify-between items-center">
         <Link href="/" className="flex items-center gap-2">
           <Image src="/logo.svg" alt="landinfy" width={24} height={24} />
-          <span className="font-semibold text-lg">Landinfy</span>
+          <span className="font-semibold text-lg text-white">Landinfy</span>
         </Link>
         <SignedOut>
           <div className="flex gap-2">

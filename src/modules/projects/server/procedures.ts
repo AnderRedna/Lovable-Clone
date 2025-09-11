@@ -76,7 +76,7 @@ export const projectsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      console.log("Starting projects.create", input);
+      console.log("Starting projects.create", JSON.stringify(input));
       try {
         if (process.env.DISABLE_CREDIT_CHECK !== 'true') {
           await consumeCredits();
