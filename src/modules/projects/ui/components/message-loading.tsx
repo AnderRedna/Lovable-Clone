@@ -11,7 +11,18 @@ const ShimmerMessages = ({ steps: stepsProp }: { steps?: string[] }) => {
   const [steps, setSteps] = useState<Step[]>([]);
 
   useEffect(() => {
-    if (stepsProp?.length) {
+    if (!stepsProp || stepsProp.length === 0) {
+      if (steps.length > 0) {
+        setSteps([]);
+      }
+      return;
+    }
+
+    const areDifferent =
+      steps.length !== stepsProp.length ||
+      stepsProp.some((s, i) => steps[i]?.text !== s);
+
+    if (areDifferent) {
       setSteps(stepsProp.map((s) => ({ text: s, state: "pending" })));
     }
   }, [stepsProp]);
@@ -22,28 +33,32 @@ const ShimmerMessages = ({ steps: stepsProp }: { steps?: string[] }) => {
       const stepDuration = totalDuration / (steps.length || 1);
 
       const stepInterval = setInterval(() => {
+        let stop = false;
         setSteps((currentSteps) => {
           const nextPendingIndex = currentSteps.findIndex(
             (s) => s.state === "pending"
           );
           if (nextPendingIndex !== -1) {
-            const newSteps = [...currentSteps];
-            // Do not complete the last step
-            if (nextPendingIndex < newSteps.length - 1) {
-              newSteps[nextPendingIndex] = {
-                ...newSteps[nextPendingIndex],
-                state: "completed",
-              };
-              return newSteps;
+            // If only the last step is pending, stop updating to avoid loops
+            if (nextPendingIndex === currentSteps.length - 1) {
+              stop = true;
+              return currentSteps;
             }
+            const newSteps = [...currentSteps];
+            newSteps[nextPendingIndex] = {
+              ...newSteps[nextPendingIndex],
+              state: "completed",
+            };
+            return newSteps;
           }
           return currentSteps;
         });
+        if (stop) clearInterval(stepInterval);
       }, stepDuration);
 
       return () => clearInterval(stepInterval);
     }
-  }, [steps]);
+  }, [steps.length]);
 
   if (!steps.length) {
     return (

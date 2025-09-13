@@ -1,11 +1,13 @@
 import { CheckCircle, Loader } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 interface StepState {
   text: string;
   state: "pending" | "completed";
 }
+
+const deepEqual = (a: StepState[], b: StepState[]) => JSON.stringify(a) === JSON.stringify(b);
 
 function loadProgress(messageId: string): StepState[] | null {
   try {
@@ -41,7 +43,7 @@ export function StepsCard({ steps, messageId, forceComplete }: { steps: string[]
   }, [steps, messageId]);
 
   const [visibleSteps, setVisibleSteps] = useState<StepState[]>(initial);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [tick, setTick] = useState(0);
 
   // Persist progress and start timestamp on changes
   useEffect(() => {
@@ -51,57 +53,37 @@ export function StepsCard({ steps, messageId, forceComplete }: { steps: string[]
     }
   }, [messageId, visibleSteps, startTs]);
 
-  // When steps prop changes (rare), ensure at least first step is visible
+  // Drive a 1s tick while processing steps (not forced complete)
   useEffect(() => {
-    if (visibleSteps.length === 0 && steps?.length) {
-      setVisibleSteps([{ text: steps[0], state: "pending" }]);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [steps]);
+    if (!steps?.length || forceComplete) return;
+    const id = setInterval(() => setTick((t) => (t + 1) % 1000000), 1000);
+    return () => clearInterval(id);
+  }, [steps?.length, forceComplete]);
 
+  // Compute visible steps based on elapsed time and props
   useEffect(() => {
     if (!steps?.length) return;
 
     if (forceComplete) {
       const allDone: StepState[] = steps.map((t) => ({ text: t, state: "completed" }));
-      setVisibleSteps(allDone);
+      setVisibleSteps((prev) => (deepEqual(prev, allDone) ? prev : allDone));
       return;
     }
 
-    // Start timer baseline on first render with steps
-    if (visibleSteps.length === 0) {
-      setStartTs((prev) => {
-        const now = Date.now();
-        return prev || now;
-      });
-      setVisibleSteps([{ text: steps[0], state: "pending" }]);
+    const elapsed = Date.now() - startTs;
+    const stepMs = 20000;
+    const maxCompletable = Math.max(0, steps.length - 1);
+    const completedCount = Math.min(Math.floor(elapsed / stepMs), maxCompletable);
+    const next: StepState[] = [];
+    for (let i = 0; i < steps.length; i++) {
+      if (i < completedCount) next.push({ text: steps[i], state: "completed" });
+      else if (i === completedCount) next.push({ text: steps[i], state: "pending" });
+      else break;
     }
-
-    const sync = () => {
-      const elapsed = Date.now() - startTs;
-      const stepMs = 20000;
-      // Never auto-complete the last step; it completes only with forceComplete
-      const maxCompletable = Math.max(0, steps.length - 1);
-      const completedCount = Math.min(Math.floor(elapsed / stepMs), maxCompletable);
-      const next: StepState[] = [];
-      for (let i = 0; i < steps.length; i++) {
-        if (i < completedCount) next.push({ text: steps[i], state: "completed" });
-        else if (i === completedCount) next.push({ text: steps[i], state: "pending" });
-        else break; // do not reveal further steps yet
-      }
-      if (next.length && JSON.stringify(next) !== JSON.stringify(visibleSteps)) {
-        setVisibleSteps(next);
-      }
-    };
-
-    // Initial sync and then every second for resilience
-    sync();
-    if (timerRef.current) clearInterval(timerRef.current as any);
-    timerRef.current = setInterval(sync, 1000) as any;
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current as any);
-    };
-  }, [steps, startTs, forceComplete, visibleSteps]);
+    if (next.length) {
+      setVisibleSteps((prev) => (deepEqual(prev, next) ? prev : next));
+    }
+  }, [steps, startTs, forceComplete, tick]);
 
   return (
     <div className="flex flex-col group px-2 pb-4">

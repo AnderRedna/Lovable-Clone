@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Fragment } from "@/generated/prisma";
 import { useTRPC } from "@/trpc/client";
@@ -58,14 +58,14 @@ const MessagesContainer = ({
   const [clientPending, setClientPending] = useState(false);
 
   const stepsMessage = messages?.findLast((message) => message.type === "STEPS");
-  let steps;
-  try {
-    if (stepsMessage) {
-      steps = JSON.parse(stepsMessage.content);
+  const steps = useMemo(() => {
+    try {
+      return stepsMessage ? (JSON.parse(stepsMessage.content) as string[]) : undefined;
+    } catch (e) {
+      console.error("Failed to parse steps", e);
+      return undefined;
     }
-  } catch (e) {
-    console.error("Failed to parse steps", e);
-  }
+  }, [stepsMessage?.content]);
 
   // Keep processing UI while we have steps and no final result/error after them
   const stepsIndex = stepsMessage && messages ? messages.findIndex((m) => m.id === stepsMessage.id) : -1;
@@ -87,6 +87,11 @@ const MessagesContainer = ({
   }, [messages, clientPending]);
 
   const isProcessing = clientPending || isLastMessageUser || (!!stepsMessage && !hasFinalAfterSteps);
+
+  // Determine if we're waiting for new steps after the latest user action
+  const lastUserIdx = messages?.findLastIndex((m) => m.role === "USER") ?? -1;
+  const lastStepsIdx = messages?.findLastIndex((m) => m.type === "STEPS") ?? -1;
+  const awaitingNewSteps = !stepsMessage || lastStepsIdx < lastUserIdx;
 
   return (
     <div className="flex flex-col flex-1 min-h-0 bg-white dark:bg-sidebar">
@@ -130,8 +135,8 @@ const MessagesContainer = ({
 
           {/* Show loader only before steps are available */}
           {/* Mostrar loader antes dos steps desta requisição aparecerem */}
-          {isProcessing && (!stepsMessage || (messages && messages.findLastIndex((m) => m.type === "STEPS") < messages.findLastIndex((m) => m.role === "USER"))) && (
-            <MessageLoading steps={steps} />
+          {isProcessing && awaitingNewSteps && (
+            <MessageLoading />
           )}
 
           <div ref={bottomRef} />

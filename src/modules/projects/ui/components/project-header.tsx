@@ -18,6 +18,7 @@ import { ChevronDownIcon, ChevronLeftIcon, SunMoonIcon } from "lucide-react";
 import { useTheme } from "next-themes";
 import Image from "next/image";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 
 interface ProjectHeaderProps {
   projectId: string;
@@ -31,6 +32,11 @@ const ProjectHeader = ({ projectId }: ProjectHeaderProps) => {
 
   const { setTheme, theme } = useTheme();
 
+  // Avoid hydration mismatch by rendering a stable placeholder on SSR
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const displayName = mounted && project?.name ? project.name : "...";
+
   return (
     <header className="p-2 flex justify-between items-center border-b">
       <DropdownMenu>
@@ -41,7 +47,9 @@ const ProjectHeader = ({ projectId }: ProjectHeaderProps) => {
             className="focus-visible:ring-0 hover:bg-transparent hover:opacity-75 transition-opacity pl-2!"
           >
             <Image src="/logo.svg" alt="lovable-clone" height={18} width={18} />
-            <span className="text-sm font-medium">{project?.name}</span>
+            <span className="text-sm font-medium" suppressHydrationWarning>
+              {displayName}
+            </span>
             <ChevronDownIcon />
           </Button>
         </DropdownMenuTrigger>
