@@ -542,7 +542,8 @@ export const codeAgentFunction = inngest.createFunction(
               }
             });
             if (typeof newFiles === "object") {
-              network.state.data.files = newFiles;
+              const prev = (network.state.data.files || {}) as Record<string, string>;
+              network.state.data.files = { ...prev, ...(newFiles as any) } as any;
             }
           },
         }),
@@ -1187,30 +1188,103 @@ export const codeAgentFunction = inngest.createFunction(
         } catch (e) {
           console.warn("postprocess: ensure animation deps failed", e);
         }
-
-        // 10) Fallback demo page: do NOT overwrite app/page.tsx; create demo route only if root page is missing
-        try {
-          const bgComp = await readSafe("components/ui/background-paths.tsx");
-          if (bgComp) {
-            const pagePath = "app/page.tsx";
-            const pageRaw = await readSafe(pagePath);
-            if (!pageRaw) {
-              const demoPath = "app/demos/background-paths/page.tsx";
-              const demo = `import { BackgroundPaths } from '@/components/ui/background-paths';
-
-export default function Page() {
-  return <BackgroundPaths title="Background Paths" />;
-}
-`;
-              await sandbox.files.write(demoPath, demo);
-              result.state.data.files[demoPath] = demo;
-            }
-          }
-        } catch (e) {
-          console.warn("postprocess: fallback BackgroundPaths demo failed", e);
-        }
       });
     }
+
+    // Reconcile: ensure all in-memory files exist in the sandbox before composing the page
+    await step.run("reconcile-files-to-sandbox", async () => {
+      try {
+        const sandbox = await getSandbox(sandboxId);
+        const files = (result.state.data.files || {}) as Record<string, string>;
+        for (const [p, c] of Object.entries(files)) {
+          try {
+            await sandbox.files.read(p);
+          } catch {
+            await sandbox.files.write(p, String(c ?? ""));
+          }
+        }
+      } catch (e) {
+        console.warn("reconcile-files-to-sandbox (create) failed", e);
+      }
+    });
+
+    // Ensure a root page exists or repair if default template before exposing URL
+    await step.run("ensure-root-page", async () => {
+      try {
+        const files = (result.state.data.files || {}) as Record<string, string>;
+        const sandbox = await getSandbox(sandboxId);
+        const hasSrc = Object.keys(files).some((p) => p.startsWith("src/"));
+        const pagePath = hasSrc ? "src/app/page.tsx" : "app/page.tsx";
+        let pageRaw = "";
+        try { pageRaw = await sandbox.files.read(pagePath); } catch {}
+        const isDefault = !!pageRaw && DEFAULT_NEXT_TEMPLATE_RE.test(pageRaw);
+        const missing = !pageRaw;
+        if (!missing && !isDefault) return;
+
+        // Build imports + body from existing app sections that expose a named export matching file name
+        const candidates = Object.entries(files)
+          .filter(([p]) => /^(src\/)?app\/.+\.tsx$/i.test(p) && !/\b(page|layout)\.tsx$/i.test(p))
+          .map(([p, content]) => ({ p, content: String(content || "") }));
+
+        const pick = (names: string[]) => candidates.find((c) => names.some((n) => new RegExp(`(^|\/)${n}\.tsx$`, "i").test(c.p)));
+        const ordered: { name: string; rel: string; content: string }[] = [];
+        const pushIf = (base: string) => {
+          const hit = candidates.find((c) => new RegExp(`(^|\/)${base}\.tsx$`, "i").test(c.p));
+          if (!hit) return;
+          const name = base.replace(/\.tsx$/i, "");
+          if (new RegExp(`export\s+(function|const|class)\s+${name}\b`).test(hit.content)) {
+            const rel = `./${name}`;
+            ordered.push({ name, rel, content: hit.content });
+          }
+        };
+        // Prefer common sections first
+        pushIf("Navbar");
+        pushIf("HeroBanner");
+        // Add a few more common names if present
+        ["Header","Hero","CallToAction","Features","Pricing","Testimonials","Clients","Gallery","VideoSection","Contact","Footer"].forEach(pushIf);
+        // If nothing matched from in-memory files, try reading common sections directly from sandbox
+        if (ordered.length === 0) {
+          const common = ["Navbar","HeroBanner","Header","Hero","CallToAction","Features","Pricing","Testimonials","Clients","Gallery","VideoSection","Contact","Footer"];
+          for (const base of common) {
+            const p = `${hasSrc ? "src/" : ""}app/${base}.tsx`;
+            try {
+              const src = await sandbox.files.read(p);
+              if (src && new RegExp(`export\\s+(function|const|class)\\s+${base}\\b`).test(src)) {
+                ordered.push({ name: base, rel: `./${base}`, content: src });
+              }
+            } catch {}
+          }
+        }
+
+        // Fallback: if nothing matched, create minimal page
+        const imports = ordered.map((o) => `import { ${o.name} } from '${o.rel}';`).join("\n");
+        const body = ordered.map((o) => `      <${o.name} />`).join("\n");
+        const composed = `"use client";\n${imports ? imports + "\n\n" : ""}export default function Page(){\n  return (\n    <main className=\"min-h-screen w-full flex flex-col\">\n${body || "      <div />"}\n    </main>\n  );\n}\n`;
+        await sandbox.files.write(pagePath, composed);
+        files[pagePath] = composed;
+        (result.state.data.files as any) = files;
+      } catch (e) {
+        console.warn("ensure-root-page (create) failed", e);
+      }
+    });
+
+    // Snapshot essential files (like app/src app page) after ensuring final page content
+    await step.run("snapshot-essential-files", async () => {
+      try {
+        const sandbox = await getSandbox(sandboxId);
+        const candidates = ["app/page.tsx", "src/app/page.tsx"];
+        for (const p of candidates) {
+          try {
+            const src = await sandbox.files.read(p);
+            if (src && typeof src === "string") {
+              (result.state.data.files as any)[p] = src;
+            }
+          } catch {}
+        }
+      } catch (e) {
+        console.warn("snapshot-essential-files (create) failed", e);
+      }
+    });
 
     const sandboxUrl = await step.run("get-sandbox-url", async () => {
       console.log("Running get-sandbox-url");
@@ -1290,8 +1364,47 @@ export const codeAgentEditFunction = inngest.createFunction(
         include: { fragment: true },
         orderBy: { createdAt: "desc" },
       });
-      const files = (last as any)?.fragment?.files as FileCollection | undefined;
-      return files || {};
+      const files = ((last as any)?.fragment?.files as FileCollection | undefined) || {};
+      // Harden: if previous fragment missed app/src page.tsx, synthesize one from known sections
+      try {
+        const hasSrc = Object.keys(files).some((p) => p.startsWith("src/"));
+        const pagePath = hasSrc ? "src/app/page.tsx" : "app/page.tsx";
+        if (!files[pagePath]) {
+          const candidates = Object.entries(files)
+            .filter(([p]) => /^(src\/)?app\/.+\.tsx$/i.test(p) && !/\b(page|layout)\.tsx$/i.test(p))
+            .map(([p, content]) => ({ p, content: String(content || "") }));
+          const ordered: { name: string; rel: string; content: string }[] = [];
+          const pushIf = (base: string) => {
+            const hit = candidates.find((c) => new RegExp(`(^|\/)${base}\.tsx$`, "i").test(c.p));
+            if (!hit) return;
+            const name = base.replace(/\.tsx$/i, "");
+            if (new RegExp(`export\\s+(function|const|class)\\s+${name}\\b`).test(hit.content)) {
+              const rel = `./${name}`;
+              ordered.push({ name, rel, content: hit.content });
+            }
+          };
+          [
+            "Navbar",
+            "HeroBanner",
+            "Header",
+            "Hero",
+            "CallToAction",
+            "Features",
+            "Pricing",
+            "Testimonials",
+            "Clients",
+            "Gallery",
+            "VideoSection",
+            "Contact",
+            "Footer",
+          ].forEach(pushIf);
+          const imports = ordered.map((o) => `import { ${o.name} } from '${o.rel}';`).join("\n");
+          const body = ordered.map((o) => `      <${o.name} />`).join("\n");
+          const composed = `"use client";\n${imports ? imports + "\n\n" : ""}export default function Page(){\n  return (\n    <main className=\"min-h-screen w-full flex flex-col\">\n${body || "      <div />"}\n    </main>\n  );\n}\n`;
+          files[pagePath] = composed;
+        }
+      } catch {}
+      return files;
     });
 
     // Hydrate sandbox with existing files
@@ -1510,7 +1623,8 @@ export const codeAgentEditFunction = inngest.createFunction(
               }
             });
             if (typeof newFiles === "object") {
-              (network as any).state.data.files = newFiles as any;
+              const prev = (network.state.data.files || {}) as Record<string, string>;
+              (network as any).state.data.files = { ...prev, ...(newFiles as any) } as any;
             }
           },
         }),
@@ -1526,7 +1640,10 @@ export const codeAgentEditFunction = inngest.createFunction(
           handler: async ({ filePath, importLine, jsx, position }, { step, network }) => {
             return await step?.run("safeUpdatePage", async () => {
               const sandbox = await getSandbox(sandboxId);
-              const path = normalizeSandboxPath(filePath, false);
+              const filesState = (network.state.data.files || {}) as Record<string, string>;
+              const hasSrc = Object.keys(filesState).some((p) => p.startsWith("src/")) ||
+                (await (async () => { try { await sandbox.files.read("src/app/page.tsx"); return true; } catch { return false; } })());
+              const path = normalizeSandboxPath(filePath, hasSrc);
               const guard = new Set<string>((network.state.data.allowedPaths || []) as string[]);
               if (!isPathAllowed(path, guard)) return `Blocked: ${path} not in allowedPaths.`;
               let prev = "";
@@ -1534,7 +1651,6 @@ export const codeAgentEditFunction = inngest.createFunction(
               if (!prev) {
                 prev = `"use client";\n\nexport default function Page(){\n  return (<main className=\"min-h-screen w-full\">{\"\"}</main>);\n}\n`;
               }
-              const filesState = (network.state.data.files || {}) as Record<string, string>;
               const importPreferred = sanitizeUiImportToApp(importLine, filesState);
               const sanitized = sanitizeDemoImport(importPreferred, jsx, filesState);
               const adjusted = ensureUniqueAlias(sanitized.importLine, prev, sanitized.jsx);
@@ -1654,6 +1770,92 @@ export const codeAgentEditFunction = inngest.createFunction(
     const isError =
       !result.state.data.summary ||
       Object.keys(result.state.data.files || {}).length === 0;
+
+    // Reconcile: ensure all in-memory files exist in the sandbox before composing the page
+    await step.run("reconcile-files-to-sandbox", async () => {
+      try {
+        const sandbox = await getSandbox(sandboxId);
+        const files = (result.state.data.files || {}) as Record<string, string>;
+        for (const [p, c] of Object.entries(files)) {
+          try {
+            await sandbox.files.read(p);
+          } catch {
+            await sandbox.files.write(p, String(c ?? ""));
+          }
+        }
+      } catch (e) {
+        console.warn("reconcile-files-to-sandbox (edit) failed", e);
+      }
+    });
+
+    // Ensure a root page exists or repair if default template before exposing URL
+    await step.run("ensure-root-page", async () => {
+      try {
+        const files = (result.state.data.files || {}) as Record<string, string>;
+        const sandbox = await getSandbox(sandboxId);
+        const hasSrc = Object.keys(files).some((p) => p.startsWith("src/"));
+        const pagePath = hasSrc ? "src/app/page.tsx" : "app/page.tsx";
+        let pageRaw = "";
+        try { pageRaw = await sandbox.files.read(pagePath); } catch {}
+        const isDefault = !!pageRaw && DEFAULT_NEXT_TEMPLATE_RE.test(pageRaw);
+        const missing = !pageRaw;
+        if (!missing && !isDefault) return;
+
+        const candidates = Object.entries(files)
+          .filter(([p]) => /^(src\/)?app\/.+\.tsx$/i.test(p) && !/\b(page|layout)\.tsx$/i.test(p))
+          .map(([p, content]) => ({ p, content: String(content || "") }));
+
+        const ordered: { name: string; rel: string; content: string }[] = [];
+        const pushIf = (base: string) => {
+          const hit = candidates.find((c) => new RegExp(`(^|\/)${base}\.tsx$`, "i").test(c.p));
+          if (!hit) return;
+          const name = base.replace(/\.tsx$/i, "");
+          if (new RegExp(`export\s+(function|const|class)\s+${name}\b`).test(hit.content)) {
+            const rel = `./${name}`;
+            ordered.push({ name, rel, content: hit.content });
+          }
+        };
+        ["Navbar","HeroBanner","Header","Hero","CallToAction","Features","Pricing","Testimonials","Clients","Gallery","VideoSection","Contact","Footer"].forEach(pushIf);
+        if (ordered.length === 0) {
+          const common = ["Navbar","HeroBanner","Header","Hero","CallToAction","Features","Pricing","Testimonials","Clients","Gallery","VideoSection","Contact","Footer"];
+          for (const base of common) {
+            const p = `${hasSrc ? "src/" : ""}app/${base}.tsx`;
+            try {
+              const src = await sandbox.files.read(p);
+              if (src && new RegExp(`export\\s+(function|const|class)\\s+${base}\\b`).test(src)) {
+                ordered.push({ name: base, rel: `./${base}`, content: src });
+              }
+            } catch {}
+          }
+        }
+        const imports = ordered.map((o) => `import { ${o.name} } from '${o.rel}';`).join("\n");
+        const body = ordered.map((o) => `      <${o.name} />`).join("\n");
+        const composed = `"use client";\n${imports ? imports + "\n\n" : ""}export default function Page(){\n  return (\n    <main className=\"min-h-screen w-full flex flex-col\">\n${body || "      <div />"}\n    </main>\n  );\n}\n`;
+        await sandbox.files.write(pagePath, composed);
+        files[pagePath] = composed;
+        (result.state.data.files as any) = files;
+      } catch (e) {
+        console.warn("ensure-root-page (edit) failed", e);
+      }
+    });
+
+    // Snapshot essential files (like app/src app page) after ensuring final page content
+    await step.run("snapshot-essential-files", async () => {
+      try {
+        const sandbox = await getSandbox(sandboxId);
+        const candidates = ["app/page.tsx", "src/app/page.tsx"];
+        for (const p of candidates) {
+          try {
+            const src = await sandbox.files.read(p);
+            if (src && typeof src === "string") {
+              (result.state.data.files as any)[p] = src;
+            }
+          } catch {}
+        }
+      } catch (e) {
+        console.warn("snapshot-essential-files (edit) failed", e);
+      }
+    });
 
     const sandboxUrl = await step.run("get-sandbox-url", async () => {
       const sandbox = await getSandbox(sandboxId);

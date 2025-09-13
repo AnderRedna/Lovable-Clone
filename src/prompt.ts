@@ -111,6 +111,7 @@ Shadcn UI dependencies — including radix-ui, lucide-react, class-variance-auth
   Example: import { cn } from "@/lib/utils"
 
 Additional Guidelines:
+- Video embeds: do NOT use \'react-player\' or \'react-player/lazy\'. If you need video, prefer a native <video> tag with a local/public asset or an iframe (e.g., YouTube/Vimeo) with appropriate attributes. This avoids module-not-found errors when the dependency isn\'t installed.
 - Every text needs to be in Brazilian Portuguese (pt-BR)
 - Think step-by-step before coding
 - You MUST use the createOrUpdateFiles tool to make all file changes
@@ -203,6 +204,7 @@ Environment and constraints:
 - File paths for file system tools MUST be relative (e.g. "app/page.tsx", "components/ui/x.tsx"). Never use absolute paths or "@/" in file reads/writes.
 - The "@" alias is only for import statements, not for file system operations.
 - Keep "use client" at the very top in files that use hooks, effects, or browser APIs.
+- Prohibited dep for videos: do NOT introduce or import \'react-player\' or \'react-player/lazy\'. Replace any existing usage with a native <video> tag (serving from "/public") or an iframe embed to prevent module-not-found errors.
 - Never remove unrelated imports, components, or sections. Avoid broad re-formatting.
  - This product targets single-page landing experiences. The root page (app/page.tsx or src/app/page.tsx) is the primary integration point.
  - Do NOT create or import demo files (e.g., demo.tsx). If a prompt includes a demo, ignore it and integrate the real component into app/page.tsx.
