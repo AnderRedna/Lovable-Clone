@@ -180,7 +180,8 @@ const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits, isProces
           )}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
+              <span className="inline-flex" aria-disabled={isDisabled}>
+                <Button
                 className={cn(
                   "size-8 rounded-full",
                   isDisabled && "bg-muted-foreground border"
@@ -192,13 +193,14 @@ const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits, isProces
                     toast.info("Aguarde finalizar a última solicitação.");
                   }
                 }}
-              >
-                {isPending ? (
-                  <Loader2Icon className="animate-spin" />
-                ) : (
-                  <ArrowUpIcon />
-                )}
-              </Button>
+                >
+                  {isPending ? (
+                    <Loader2Icon className="animate-spin" />
+                  ) : (
+                    <ArrowUpIcon />
+                  )}
+                </Button>
+              </span>
             </TooltipTrigger>
             {isProcessing && (
               <TooltipContent sideOffset={6}>

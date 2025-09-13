@@ -92,6 +92,7 @@ Additional Guidelines:
 - Unless explicitly asked otherwise, always assume the task requires a full page layout — including all structural elements like headers, navbars, footers, content sections, and appropriate containers
 - Always implement realistic behavior and interactivity — not just static UI
  - Animations: use Tailwind's built-in utilities (e.g., transition, duration, ease, animate-*) only. Do NOT author custom @keyframes or raw CSS anywhere
+ - Syntactic Completeness: All files you write must be fully compilable TS/TSX with balanced parentheses, braces, brackets, and JSX tags. Never end a component mid-return. Arrow/function components must close with \`);\` (or the appropriate braces) and files must end with a newline. Do not leave unfinished expressions or dangling JSX.
 - Break complex UIs or logic into multiple components when appropriate — do not put everything into a single file
 - Use TypeScript and production-quality code (no TODOs or placeholders)
 - You MUST use Tailwind CSS for all styling — never use plain CSS, SCSS, or external stylesheets
@@ -161,6 +162,7 @@ Editing policy:
   - For small textual changes, perform a narrow in-place replacement. Do not rewrite the whole file.
   - Preserve imports, component order, and structure.
   - Language: Any added or modified user-facing copy must be in Brazilian Portuguese (pt-BR).
+  - Syntactic safety: Do not introduce syntax errors. Keep parentheses/braces/JSX balanced. If you edit an arrow/function component, ensure the final \`return (... )\` and closing \`);\` remain intact. Do not leave unfinished JSX or expressions.
 3) Section swaps and insertions (generic):
   - Identify the <main> block in app/page.tsx.
   - Recognized section types (match JSX tag/component names containing these tokens; singular/plural, case-insensitive):
