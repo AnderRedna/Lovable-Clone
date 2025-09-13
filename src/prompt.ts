@@ -106,7 +106,7 @@ Additional Guidelines:
 - Follow React best practices: semantic HTML, ARIA where needed, clean useState/useEffect usage
 - Use only static/local data (no external APIs)
 - Responsive and accessible by default
-- Do not use local or external image URLs — instead rely on emojis and divs with proper aspect ratios (aspect-video, aspect-square, etc.) and color placeholders (e.g. bg-gray-200)
+ - Images: use Lorem Picsum placeholders. For custom sizes use https://picsum.photos/<width>/<height> (e.g., https://picsum.photos/200/300). For square images use https://picsum.photos/<size> (e.g., https://picsum.photos/200). For human faces, use https://thispersondoesnotexist.com/ to retrieve a generated portrait image. Avoid other external image sources.
 - Every screen should include a complete, realistic layout structure (navbar, sidebar, footer, content, etc.) — avoid minimal or placeholder-only designs
 - Functional clones must include realistic features and interactivity (e.g. drag-and-drop, add/edit/delete, toggle states, localStorage if helpful)
 - Prefer minimal, working features over static or hardcoded content
