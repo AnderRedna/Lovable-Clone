@@ -69,13 +69,13 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
           >
             <div className="w-full flex items-center p-2 border-b gap-x-2">
               <TabsList className="h-8 p-0 border rounded-md">
-                <TabsTrigger value="preview" className="rounded-md">
-                  <EyeIcon />
-                  <span>Preview</span>
-                </TabsTrigger>
                 <TabsTrigger value="code" className="rounded-md">
                   <CodeIcon />
                   <span>Código</span>
+                </TabsTrigger>
+                <TabsTrigger value="preview" className="rounded-md">
+                  <EyeIcon />
+                  <span>Prévia</span>
                 </TabsTrigger>
               </TabsList>
               <div className="ml-auto flex items-center gap-x-2">
