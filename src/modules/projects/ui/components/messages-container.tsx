@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Fragment } from "@/generated/prisma";
 import { useTRPC } from "@/trpc/client";
@@ -54,9 +54,10 @@ const MessagesContainer = ({
   const lastMessage = messages?.[messages?.length - 1];
   const isLastMessageUser = lastMessage?.role === "USER";
 
-  const stepsMessage = messages?.findLast(
-    (message) => message.type === "STEPS"
-  );
+  // Estado local para mostrar loader otimista logo após envio de edição/comando
+  const [clientPending, setClientPending] = useState(false);
+
+  const stepsMessage = messages?.findLast((message) => message.type === "STEPS");
   let steps;
   try {
     if (stepsMessage) {
@@ -73,7 +74,19 @@ const MessagesContainer = ({
       ? messages.slice(stepsIndex + 1).some((m) => m.type === "RESULT" || m.type === "ERROR")
       : false;
 
-  const isProcessing = isLastMessageUser || (!!stepsMessage && !hasFinalAfterSteps);
+  // Considera pending otimista até steps aparecerem; ao aparecer steps ou final, limpa
+  // Qualquer novo STEPS após a última mensagem do usuário limpa o pending otimista
+  useEffect(() => {
+    if (!messages || !clientPending) return;
+    const lastUserIdx = messages.findLastIndex((m) => m.role === "USER");
+    const lastStepsIdx = messages.findLastIndex((m) => m.type === "STEPS");
+    const lastFinalIdx = messages.findLastIndex((m) => m.type === "RESULT" || m.type === "ERROR");
+    if ((lastStepsIdx !== -1 && lastStepsIdx > lastUserIdx) || (lastFinalIdx !== -1 && lastFinalIdx > lastUserIdx)) {
+      setClientPending(false);
+    }
+  }, [messages, clientPending]);
+
+  const isProcessing = clientPending || isLastMessageUser || (!!stepsMessage && !hasFinalAfterSteps);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 bg-white dark:bg-sidebar">
@@ -116,7 +129,10 @@ const MessagesContainer = ({
           })}
 
           {/* Show loader only before steps are available */}
-          {isProcessing && !stepsMessage && <MessageLoading steps={steps} />}
+          {/* Mostrar loader antes dos steps desta requisição aparecerem */}
+          {isProcessing && (!stepsMessage || (messages && messages.findLastIndex((m) => m.type === "STEPS") < messages.findLastIndex((m) => m.role === "USER"))) && (
+            <MessageLoading steps={steps} />
+          )}
 
           <div ref={bottomRef} />
         </div>
@@ -130,6 +146,7 @@ const MessagesContainer = ({
           onToggleEditing={() => setIsEditing?.(!isEditing)}
           getEdits={getEdits}
           isProcessing={isProcessing}
+          onSubmittingChange={(v) => setClientPending(v)}
         />
       </div>
     </div>

@@ -22,13 +22,15 @@ interface MessageFormProps {
   getEdits?: () => Array<{ selector: string; oldText: string; newText: string }>;
   // Sinaliza que há uma solicitação em processamento; permite digitar, mas bloqueia envio
   isProcessing?: boolean;
+  // Notifica o container quando o envio começar/terminar (para mostrar loader otimista)
+  onSubmittingChange?: (submitting: boolean) => void;
 }
 
 const formSchema = z.object({
   value: z.string().min(1, { message: "Value is required" }),
 });
 
-const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits, isProcessing = false }: MessageFormProps) => {
+const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits, isProcessing = false, onSubmittingChange }: MessageFormProps) => {
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -66,7 +68,14 @@ const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits, isProces
       toast.info("Aguarde finalizar a última solicitação.");
       return;
     }
-    await createMessage.mutateAsync({ value: values.value, projectId });
+    try {
+      onSubmittingChange?.(true);
+      await createMessage.mutateAsync({ value: values.value, projectId });
+      // Não limpar aqui: container limpará quando steps/final chegarem
+    } catch (e) {
+      onSubmittingChange?.(false);
+      throw e;
+    }
   };
 
   const saveInlineEdits = async () => {
@@ -75,6 +84,7 @@ const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits, isProces
         toast.info("Aguarde finalizar a última solicitação.");
         return;
       }
+      // Vamos apenas sinalizar submissão se houver algo para enviar
       // Ask preview iframe to flush edits, then wait a tick
       try {
         const iframe: HTMLIFrameElement | null = document.querySelector('iframe[data-preview-iframe]');
@@ -83,13 +93,19 @@ const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits, isProces
       await new Promise((r) => setTimeout(r, 50));
       const edits = getEdits?.() || [];
       if (edits.length === 0) return;
+      onSubmittingChange?.(true);
       const value = [
         "Aplique as seguintes substituições de texto nos arquivos do projeto (apenas literais de texto em TSX/JSX/HTML/MD/JSON). Não altere lógica ou estrutura de componentes.",
         ...edits.map(
           (e, i) => `${i + 1}) \"${e.oldText}\" -> \"${e.newText}\" (selector: ${e.selector})`
         ),
       ].join("\n");
-      await createMessage.mutateAsync({ value, projectId });
+      try {
+        await createMessage.mutateAsync({ value, projectId });
+      } catch (e) {
+        onSubmittingChange?.(false);
+        throw e;
+      }
       onToggleEditing?.();
     } catch (e) {
       // ignore
