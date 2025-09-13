@@ -106,7 +106,7 @@ const MessageForm = ({ projectId }: MessageFormProps) => {
           )}
         />
 
-        <div className="flex gap-x-2 items-end justify-end pt-2">
+  <div className="flex gap-x-2 items-end justify-end pt-2">
           <Button
             className={cn(
               "size-8 rounded-full",

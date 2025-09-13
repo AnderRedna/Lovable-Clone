@@ -10,7 +10,7 @@ import {
 import { z } from "zod";
 
 import prisma from "@/lib/prisma";
-import { FRAGMENT_TITLE_PROMPT, PROMPT, RESPONSE_PROMPT } from "@/prompt";
+import { FRAGMENT_TITLE_PROMPT, PROMPT, RESPONSE_PROMPT, EDIT_PROMPT } from "@/prompt";
 import { FileCollection } from "@/types";
 import { inngest } from "./client";
 import {
@@ -73,6 +73,317 @@ const azureOpenAICompat = (opts: {
     },
   } as any;
 };
+
+// Normaliza caminhos sugeridos pelo modelo/usuário para dentro do sandbox
+function normalizeSandboxPath(p: string, hasSrc: boolean): string {
+  let s = (p || "").trim().replace(/\\/g, "/");
+  // Remove absolutos tipo "/home/user/..." ou barra raiz
+  s = s.replace(/^\/+home\/user\/(?:project\/)?/i, "");
+  s = s.replace(/^\/+/, "");
+  // Resolve alias @/
+  if (s.startsWith("@/")) {
+    s = s.replace(/^@\//, hasSrc ? "src/" : "");
+  }
+  // Se veio apenas o nome do arquivo, prefira app/ (landing page única)
+  if (s && !s.includes("/")) {
+    s = `${hasSrc ? "src/" : ""}app/${s}`;
+  }
+  // Garante extensão
+  if (!/\.(tsx|ts|jsx|js)$/i.test(s)) {
+    s = `${s}.tsx`;
+  }
+  // Normaliza segmentos . e ..
+  s = s
+    .split("/")
+    .filter(Boolean)
+    .reduce<string[]>((stack, seg) => {
+      if (seg === ".") return stack;
+      if (seg === "..") {
+        stack.pop();
+        return stack;
+      }
+      stack.push(seg);
+      return stack;
+    }, [])
+    .join("/");
+  return s;
+}
+
+function toPascalCase(name: string): string {
+  return name
+    .replace(/\.(tsx|ts|jsx|js)$/i, "")
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+    .join("");
+}
+
+function toKebabCase(name: string): string {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/\s+/g, '-')
+    .toLowerCase();
+}
+
+// Check if a path is allowed, supporting folder wildcards like components/ui/*
+function isPathAllowed(p: string, guard: Set<string>): boolean {
+  if (guard.size === 0) return true;
+  if (guard.has(p)) return true;
+  for (const g of guard) {
+    if (g.endsWith("/*")) {
+      const prefix = g.slice(0, -2);
+      if (p.startsWith(prefix)) return true;
+    }
+    if (g.endsWith("/")) {
+      if (p.startsWith(g)) return true;
+    }
+  }
+  return false;
+}
+
+// Normalize component paths: route page sections into app/ and fix common typos
+function mapComponentPath(p: string): string {
+  let out = p.replace(/princing/gi, "pricing");
+  // Normalize app/<kebab>.tsx -> app/<PascalCase>.tsx for sections
+  const appFile = out.match(/^app\/([^\/]+)\.(tsx|ts|jsx|js)$/i);
+  if (appFile) {
+    const base = appFile[1];
+    if (/-/.test(base) && !/^page$/i.test(base)) {
+      return `app/${toPascalCase(base)}.${appFile[2]}`;
+    }
+  }
+  // components/blocks/* -> app/<PascalCase>.tsx
+  if (/^components\/blocks\//i.test(out)) {
+    const base = out.split("/").pop() || "Component.tsx";
+    const pascal = toPascalCase(base);
+    return `app/${pascal}.tsx`;
+  }
+  // If looks like a page section under components/ui, move to app/<PascalCase>.tsx
+  const m = out.match(/^components\/ui\/([^\/]+)\.(tsx|ts|jsx|js)$/i);
+  if (m) {
+    const name = m[1];
+    if (/(hero|pricing|feature|testimonial|footer|header|section|banner|clients?|logos?|gallery|video|background|signup|email|cta)/i.test(name)) {
+      return `app/${toPascalCase(name)}.tsx`;
+    }
+  }
+  return out;
+}
+
+// Heurística: evitar overwrite destrutivo em app/page.*
+function shouldBlockDestructivePageWrite(prev: string, next: string): boolean {
+  if (!prev) return false;
+  const ratio = next.length / Math.max(prev.length, 1);
+  const importNames = Array.from(prev.matchAll(/import\s+([\s\S]*?)from\s+['"][^'"]+['"]/g))
+    .flatMap((m) => {
+      const spec = (m[1] || "").trim();
+      const names: string[] = [];
+      const named = spec.match(/\{([^}]+)\}/);
+      if (named) {
+        for (const n of named[1].split(",")) names.push(n.trim().split(/\s+as\s+/)[0]);
+      }
+      const def = spec.replace(named?.[0] || "", "").trim().replace(/^,/, "").trim();
+      if (def) names.push(def);
+      return names.filter(Boolean);
+    })
+    .filter(Boolean);
+  const usedNames = new Set(importNames.filter((n) => new RegExp(`<${n}\\b`).test(prev)));
+  const stillUsed = Array.from(usedNames).filter((n) => new RegExp(`<${n}\\b`).test(next));
+  if (ratio < 0.6 && usedNames.size >= 2 && stillUsed.length <= 0) return true;
+  return false;
+}
+
+function ensureImportLine(src: string, importLine: string): string {
+  if (!importLine?.trim()) return src;
+  if (src.includes(importLine.trim())) return src;
+  const lines = src.split("\n");
+  let insertIdx = 0;
+  if (/^\s*['"]use client['"]\s*;?/.test(lines[0] || "")) insertIdx = 1;
+  for (let i = insertIdx; i < lines.length; i++) {
+    if (/^\s*import\s+/.test(lines[i])) insertIdx = i + 1;
+    else if (lines[i].trim() && !/^\s*(\/\*|\/\/)/.test(lines[i])) break;
+  }
+  lines.splice(insertIdx, 0, importLine.trim());
+  return lines.join("\n");
+}
+
+function insertJsxIntoMain(src: string, jsx: string, position: "prepend" | "append" = "prepend"): string {
+  const openIdx = src.search(/<main\b[^>]*>/i);
+  const closeIdx = src.search(/<\/main>/i);
+  if (openIdx !== -1 && closeIdx !== -1 && closeIdx > openIdx) {
+    const afterOpen = src.indexOf(">", openIdx) + 1;
+    if (position === "prepend") {
+      return src.slice(0, afterOpen) + `\n      ${jsx}\n` + src.slice(afterOpen);
+    } else {
+      return src.slice(0, closeIdx) + `\n      ${jsx}\n` + src.slice(closeIdx);
+    }
+  }
+  const retIdx = src.indexOf("return");
+  if (retIdx !== -1) {
+    const paren = src.indexOf("(", retIdx);
+    if (paren !== -1) {
+      return src.slice(0, paren + 1) + `\n    ${jsx}\n` + src.slice(paren + 1);
+    }
+  }
+  return src + `\n${jsx}\n`;
+}
+
+// Guard leve: evitar remoção acidental de seções críticas em app/page.* durante EDIÇÃO
+function violatesCriticalSections(prev: string, next: string): string | null {
+  const hadMain = /<main\b/i.test(prev);
+  const hasMain = /<main\b/i.test(next);
+  if (hadMain && !hasMain) return "main tag removed";
+  const hadHeader = /<\s*(Navbar|header)\b/i.test(prev);
+  const hasHeader = /<\s*(Navbar|header)\b/i.test(next);
+  if (hadHeader && !hasHeader) return "header/navbar removed";
+  const hadFooter = /<\s*(Footer|footer)\b/i.test(prev);
+  const hasFooter = /<\s*(Footer|footer)\b/i.test(next);
+  if (hadFooter && !hasFooter) return "footer removed";
+  return null;
+}
+
+// Extrai nomes importados (default, named e "as") de um arquivo para detectar conflitos
+function extractImportedNames(src: string): string[] {
+  const importNames = Array.from(src.matchAll(/import\s+([\s\S]*?)from\s+['"][^'"]+['"]/g))
+    .flatMap((m) => {
+      const spec = (m[1] || "").trim();
+      const names: string[] = [];
+      const named = spec.match(/\{([^}]+)\}/);
+      if (named) {
+        for (const n of named[1].split(",")) {
+          const parts = n.trim().split(/\s+as\s+/);
+          names.push((parts[1] || parts[0]).trim());
+        }
+      }
+      const def = spec.replace(named?.[0] || "", "").trim().replace(/^,/, "").trim();
+      if (def) names.push(def);
+      return names.filter(Boolean);
+    });
+  return importNames;
+}
+
+// Ensure imported alias does not collide with existing imports in prevSrc
+function ensureUniqueAlias(importLine: string, prevSrc: string, jsx: string): { importLine: string; jsx: string } {
+  const candidates: string[] = [];
+  const def = importLine.match(/import\s+([A-Za-z_$][\w$]*)\s*(?:,|\s+from)/)?.[1];
+  if (def) candidates.push(def);
+  const namedGroup = importLine.match(/\{([^}]+)\}/);
+  if (namedGroup) {
+    for (const n of namedGroup[1].split(",")) {
+      const parts = n.trim().split(/\s+as\s+/);
+      const local = (parts[1] || parts[0]).trim();
+      if (local) candidates.push(local);
+    }
+  }
+  const alias = candidates[0];
+  if (!alias) return { importLine, jsx };
+
+  const used = new Set(extractImportedNames(prevSrc));
+  if (!used.has(alias)) return { importLine, jsx };
+
+  const special = /from\s+['"][^'"]*horizon-hero-section[^'"]*['"]/i.test(importLine) ? "HorizonHeroSection" : undefined;
+  const base = special || `${alias}New`;
+  let candidate = base;
+  let i = 2;
+  while (used.has(candidate)) candidate = `${base}${i++}`;
+
+  // Replace alias in importLine
+  let nextImport = importLine
+    // default import
+    .replace(new RegExp(`\bimport\s+${alias}\b`), `import ${candidate}`)
+    // named import with as
+    .replace(new RegExp(`\bas\s+${alias}\b`), `as ${candidate}`)
+    // named import without as (best-effort inside braces)
+    .replace(/(\{[^}]*\})/, (full) => full.replace(new RegExp(`(^|,)\s*${alias}(\s*,|$)`), (m: string) => m.replace(alias, candidate)));
+
+  const nextJsx = jsx.replace(new RegExp(`<\s*${alias}\b`, "g"), `<${candidate}`);
+  return { importLine: nextImport, jsx: nextJsx };
+}
+
+// Sanitize demo imports: replace @/components/ui/demo with real component paths
+function sanitizeDemoImport(importLine: string, jsx: string, files: Record<string, string>): { importLine: string; jsx: string } {
+  if (!/@\/components\/ui\/demo['"]?/i.test(importLine)) return { importLine, jsx };
+  const imported =
+    importLine.match(/\{\s*([A-Za-z_$][\w$]*)\s*(?:as\s*[A-Za-z_$][\w$]*)?\s*\}/)?.[1] ||
+    importLine.match(/import\s+([A-Za-z_$][\w$]*)\s+from/)
+      ?.[1] || "";
+  const baseName = imported?.replace(/Demo$/i, "") || "Section";
+  const appPath = `app/${baseName}.tsx`;
+  const uiPath = `components/ui/${baseName.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()}.tsx`;
+  let newSpecifier = `./${baseName}`;
+  if (!files[appPath] && files[uiPath]) {
+    newSpecifier = `@/components/ui/${uiPath.split("/").pop()!.replace(/\.tsx?$/i, "")}`;
+  }
+  let nextImport = importLine.replace(/@\/components\/ui\/demo/gi, newSpecifier);
+  if (imported) {
+    nextImport = nextImport.replace(new RegExp(`\\b${imported}\\b`, "g"), baseName);
+  }
+  const nextJsx = imported ? jsx.replace(new RegExp(`<\\s*${imported}\\b`, "g"), `<${baseName}`) : jsx;
+  return { importLine: nextImport, jsx: nextJsx };
+}
+
+// Rewrite imports from @/components/ui/<slug> to local app/<PascalCase> when that file exists
+function sanitizeUiImportToApp(importLine: string, files: Record<string, string>): string {
+  const m = importLine.match(/from\s+["']@\/components\/ui\/([^"']+)["']/i);
+  if (!m) return importLine;
+  const slug = m[1].split("/").pop() || "";
+  if (!slug) return importLine;
+  const baseName = toPascalCase(slug);
+  const appPathTsx = `app/${baseName}.tsx`;
+  const appPathTs = `app/${baseName}.ts`;
+  if (files[appPathTsx] || files[appPathTs]) {
+    return importLine.replace(/from\s+["']@\/components\/ui\/[^"']+["']/i, `from './${baseName}'`);
+  }
+  return importLine;
+}
+
+// Normalize content of files written under app/:
+// - Fix relative imports using kebab-case (./creative-pricing -> ./CreativePricing)
+// - Ensure Shadcn primitives import from @/components/ui/* (e.g., Button -> @/components/ui/button)
+function normalizeAppFileContent(filePath: string, content: string): string {
+  if (!/^app\//i.test(filePath) || typeof content !== 'string') return content;
+  let out = content;
+
+  // 1) Fix relative kebab-case imports to PascalCase
+  out = out.replace(/from\s+(["'])\.\/(?!\.)([a-z0-9\-]+)(?:\.(?:tsx|ts|jsx|js))?\1/g, (m, quote, slug) => {
+    const pascal = toPascalCase(slug);
+    return m.replace(new RegExp(`\.\/${slug}`), `./${pascal}`);
+  });
+
+  // 2) Force Shadcn primitives to import from @/components/ui/<kebab>
+  const primitiveMap: Record<string, string> = {
+    Button: 'button',
+    Input: 'input',
+    Card: 'card',
+    Badge: 'badge',
+    Tabs: 'tabs',
+    Sheet: 'sheet',
+    Dialog: 'dialog',
+    Tooltip: 'tooltip',
+    Separator: 'separator',
+  };
+  out = out.replace(/import\s+([^;]+?)\s+from\s+(["'])([^"']+)\2\s*;?/g, (full, spec, q, src) => {
+    // Already correct
+    if (/^@\/components\/ui\//.test(src)) return full;
+    // Only adjust if it's a relative import or bare and matches a known primitive name
+    const names: string[] = [];
+    const named = spec.match(/\{([^}]+)\}/);
+    if (named) {
+      for (const n of named[1].split(',')) {
+        const local = n.trim().split(/\s+as\s+/).pop() || '';
+        if (local) names.push(local);
+      }
+    }
+    const def = spec.replace(named?.[0] || '', '').trim().replace(/^,/, '').trim();
+    if (def) names.push(def);
+
+    const found = names.find((n) => primitiveMap[n]);
+    if (!found) return full;
+    const kebab = primitiveMap[found] || toKebabCase(found);
+    return `import ${spec} from ${q}@/components/ui/${kebab}${q};`;
+  });
+
+  return out;
+}
 
 export const codeAgentFunction = inngest.createFunction(
   { id: "code-agent" },
@@ -140,7 +451,6 @@ export const codeAgentFunction = inngest.createFunction(
       }
     );
 
-    // Create a new agent with a system prompt (you can add optional tools, too)
     const codeAgent = createAgent<AgentState>({
       name: "code-agent",
       description: "An expert coding agent",
@@ -150,41 +460,27 @@ export const codeAgentFunction = inngest.createFunction(
         apiKey: process.env.AZURE_OPENAI_API_KEY!,
         deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
         apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
-        defaultParameters: {
-          temperature: 0.1,
-        },
+        defaultParameters: { temperature: 0.1 },
       }),
       tools: [
         createTool({
           name: "terminal",
           description: "Use the terminal to run commands",
-          parameters: z.object({
-            command: z.string(),
-          }),
+          parameters: z.object({ command: z.string() }),
           handler: async ({ command }, { step }) => {
             console.log("Running terminal tool", command);
             return await step?.run("terminal", async () => {
-              const buffers = {
-                stdout: "",
-                stderr: "",
-              };
-
+              const buffers = { stdout: "", stderr: "" };
               try {
                 const sandbox = await getSandbox(sandboxId);
                 const result = await sandbox.commands.run(command, {
-                  onStdout: (data: string) => {
-                    buffers.stdout += data;
-                  },
-                  onStderr: (data: string) => {
-                    buffers.stderr += data;
-                  },
+                  onStdout: (data: string) => { buffers.stdout += data; },
+                  onStderr: (data: string) => { buffers.stderr += data; },
                 });
                 console.log("Completed terminal tool", result.exitCode);
                 return result.stdout;
               } catch (error) {
-                console.error(
-                  `command failed: ${error}\nstdOut: ${buffers.stdout}\nstdError: ${buffers.stderr}`
-                );
+                console.error(`command failed: ${error}\nstdOut: ${buffers.stdout}\nstdError: ${buffers.stderr}`);
                 return `command failed: ${error}\nstdOut: ${buffers.stdout}\nstdError: ${buffers.stderr}`;
               }
             });
@@ -194,75 +490,119 @@ export const codeAgentFunction = inngest.createFunction(
           name: "createOrUpdateFiles",
           description: "Create or update files in the sandbox",
           parameters: z.object({
-            files: z.array(
-              z.object({
-                path: z.string(),
-                content: z.string(),
-              })
-            ),
+            files: z.array(z.object({ path: z.string(), content: z.string() })),
           }),
-          handler: async (
-            { files },
-            { step, network }: Tool.Options<AgentState>
-          ) => {
+          handler: async ({ files }, { step, network }: Tool.Options<AgentState>) => {
             console.log("Running createOrUpdateFiles tool", files.length, "files");
-            const newFiles = await step?.run(
-              "createOrUpdateFiles",
-              async () => {
-                try {
-                  const updatedFiles = network.state.data.files || {};
-                  const sandbox = await getSandbox(sandboxId);
-                  const guard = new Set(network.state.data.allowedPaths || []);
-
-                  for (const file of files) {
-                    if (guard.size > 0 && !guard.has(file.path)) {
-                      console.warn(`[edit-guard] blocked write to ${file.path}`);
-                      continue;
-                    }
-                    // Template Guard: don't overwrite main page with Next.js starter content
-                    if (
-                      /app\/page\.(tsx|jsx|ts|js)$/i.test(file.path) &&
-                      DEFAULT_NEXT_TEMPLATE_RE.test(file.content)
-                    ) {
-                      console.warn(
-                        "Template guard: skipping overwrite of app/page.* with Next.js starter content"
-                      );
-                      continue;
-                    }
-
-                    await sandbox.files.write(file.path, file.content);
-                    updatedFiles[file.path] = file.content;
+            const newFiles = await step?.run("createOrUpdateFiles", async () => {
+              try {
+                const updatedFiles = network.state.data.files || {};
+                const sandbox = await getSandbox(sandboxId);
+                const hasSrc = Object.keys(updatedFiles).some((p) => p.startsWith("src/"));
+                const guard = new Set<string>((network.state.data.allowedPaths || []) as string[]);
+                for (const file of files) {
+                  let normalized = normalizeSandboxPath(file.path, hasSrc);
+                  normalized = mapComponentPath(normalized);
+                  if (!isPathAllowed(normalized, guard)) {
+                    console.warn(`[edit-guard] blocked write to ${normalized}`);
+                    continue;
                   }
-                  console.log("Completed createOrUpdateFiles tool");
-                  return updatedFiles;
-                } catch (error) {
-                  console.log("Error in createOrUpdateFiles", error);
-                  return "Error: " + error;
+                  if (/^app\/page\.(tsx|jsx|ts|js)$/i.test(normalized)) {
+                    const prev = typeof updatedFiles[normalized] === "string"
+                      ? (updatedFiles[normalized] as string)
+                      : await (async () => { try { return await sandbox.files.read(normalized); } catch { return ""; } })();
+                    if (shouldBlockDestructivePageWrite(prev || "", file.content)) {
+                      console.warn("[safe-merge] blocked destructive overwrite of app/page.*; use safeUpdatePage tool");
+                      return `Blocked destructive overwrite of ${normalized}. Use safeUpdatePage tool to insert new hero without removing existing content.`;
+                    }
+                  }
+                  if (/\/demo\.(tsx|jsx|ts|js)$/i.test(normalized)) {
+                    console.warn(`[policy] demo files are not allowed: ${normalized}`);
+                    continue;
+                  }
+                  if (/app\/page\.(tsx|jsx|ts|js)$/i.test(normalized) && DEFAULT_NEXT_TEMPLATE_RE.test(file.content)) {
+                    console.warn("Template guard: skipping overwrite of app/page.* with Next.js starter content");
+                    continue;
+                  }
+                  const finalContent = normalizeAppFileContent(normalized, file.content);
+                  await sandbox.files.write(normalized, finalContent);
+                  updatedFiles[normalized] = finalContent;
                 }
+                console.log("Completed createOrUpdateFiles tool");
+                return updatedFiles;
+              } catch (error) {
+                console.log("Error in createOrUpdateFiles", error);
+                return "Error: " + error;
               }
-            );
-
+            });
             if (typeof newFiles === "object") {
               network.state.data.files = newFiles;
             }
           },
         }),
         createTool({
+          name: "safeUpdatePage",
+          description: "Non-destructive update for app/page.*. Inserts a component into <main> and ensures import; preserves the rest of the file.",
+          parameters: z.object({
+            filePath: z.string().default("app/page.tsx"),
+            importLine: z.string(),
+            jsx: z.string(),
+            position: z.enum(["prepend", "append"]).default("append"),
+          }),
+          handler: async ({ filePath, importLine, jsx, position }, { step, network }) => {
+            return await step?.run("safeUpdatePage", async () => {
+              const sandbox = await getSandbox(sandboxId);
+              const filesState = network.state.data.files || {};
+              const hasSrc = Object.keys(filesState).some((p) => p.startsWith("src/")) ||
+                (await (async () => { try { await sandbox.files.read("src/app/page.tsx"); return true; } catch { return false; } })());
+              const path = normalizeSandboxPath(filePath, hasSrc);
+              const guard = new Set<string>((network.state.data.allowedPaths || []) as string[]);
+              if (!isPathAllowed(path, guard)) return `Blocked: ${path} not in allowedPaths.`;
+              let prev = "";
+              try { prev = await sandbox.files.read(path); } catch {}
+              if (!prev) {
+                prev = `"use client";\n\nexport default function Page(){\n  return (<main className=\"min-h-screen w-full\">{\"\"}</main>);\n}\n`;
+              }
+              // First, prefer local app/<PascalCase> if exists for any ui import
+              const importPreferred = sanitizeUiImportToApp(importLine, filesState as Record<string, string>);
+              const sanitized = sanitizeDemoImport(importPreferred, jsx, filesState as Record<string, string>);
+              const adjusted = ensureUniqueAlias(sanitized.importLine, prev, sanitized.jsx);
+              const fixedImport = adjusted.importLine;
+              const fixedJsx = adjusted.jsx;
+              let next = ensureImportLine(prev, fixedImport);
+              next = insertJsxIntoMain(next, fixedJsx, position);
+              await sandbox.files.write(path, next);
+              network.state.data.files[path] = next;
+              return `Updated ${path} with safe merge`;
+            });
+          },
+        }),
+        createTool({
           name: "readFiles",
           description: "Read files from the sandbox",
-          parameters: z.object({
-            files: z.array(z.string()),
-          }),
-          handler: async ({ files }, { step }) => {
+          parameters: z.object({ files: z.array(z.string()) }),
+          handler: async ({ files }, { step, network }) => {
             console.log("Running readFiles tool", files.length, "files");
             return await step?.run("readFiles", async () => {
               try {
                 const sandbox = await getSandbox(sandboxId);
-                const contents = [];
-
-                for (const file of files) {
-                  const content = await sandbox.files.read(file);
-                  contents.push({ path: file, content });
+                const existing = network.state.data.files || {};
+                const hasSrc = Object.keys(existing).some((p) => p.startsWith("src/"));
+                const contents: { path: string; content: string | null }[] = [];
+                for (const raw of files) {
+                  const p = normalizeSandboxPath(raw, hasSrc);
+                  try {
+                    const content = await sandbox.files.read(p);
+                    contents.push({ path: p, content });
+                  } catch (e: any) {
+                    const msg = String(e?.message || e);
+                    if (/NotFound/i.test(msg)) {
+                      console.warn(`[readFiles] not found: ${p}`);
+                      contents.push({ path: p, content: null });
+                      continue;
+                    }
+                    throw e;
+                  }
                 }
                 console.log("Completed readFiles tool", contents.length, "files read");
                 return JSON.stringify(contents);
@@ -276,12 +616,9 @@ export const codeAgentFunction = inngest.createFunction(
       ],
       lifecycle: {
         onResponse: async ({ result, network }) => {
-          // Loga os outputs do modelo a cada iteração
           logAssistantTexts("code-agent", result.output);
           console.log("Running onResponse lifecycle");
-          const lastAssistantTextMessageText =
-            lastAssistantTextMessageContent(result);
-
+          const lastAssistantTextMessageText = lastAssistantTextMessageContent(result);
           if (lastAssistantTextMessageText && network) {
             if (lastAssistantTextMessageText.includes("<task_summary>")) {
               network.state.data.summary = lastAssistantTextMessageText;
@@ -937,6 +1274,20 @@ export const codeAgentEditFunction = inngest.createFunction(
       { messages: previousMessages }
     );
 
+    const hasSrc = Object.keys(existing).some((p) => p.startsWith("src/"));
+    const userText = String((event.data as any).value || "");
+    // Hint de arquivo do bloco de código: ```tsx nome
+    const codeFencePathMatch = userText.match(/```(?:tsx|ts|jsx|js)\s+([^\s`]+)/i);
+    const codeFencePath = codeFencePathMatch?.[1];
+    // Imports citados
+    const importPaths = Array.from(userText.matchAll(/from\s+["'`](.*?)["'`]/g)).map((m) => m[1]);
+    const hintedPathsSet = new Set<string>();
+    if (codeFencePath) hintedPathsSet.add(codeFencePath);
+    importPaths.forEach((p) => hintedPathsSet.add(p));
+    const hintedAllowed = Array.from(hintedPathsSet)
+      .map((p) => normalizeSandboxPath(p, hasSrc))
+      .filter(Boolean);
+
     // Impact analyzer to select minimal set of files
     const impactAnalyzer = createAgent<AgentState>({
       name: "impact-analyzer",
@@ -975,16 +1326,29 @@ export const codeAgentEditFunction = inngest.createFunction(
     if (allowedPaths.length === 0) {
       allowedPaths = fileIndex.filter((p) => /\.(tsx|ts|jsx|js)$/.test(p)).slice(0, 5);
     }
-    state.data.allowedPaths = allowedPaths;
+    // Une com os caminhos sugeridos pelo usuário
+    const union = new Set<string>([...allowedPaths, ...hintedAllowed]);
+    // Normalize todos os caminhos permitidos de acordo com a estrutura (src/ ou não)
+    const normalizedAllowed = new Set<string>();
+    for (const p of Array.from(union)) {
+      try {
+        normalizedAllowed.add(normalizeSandboxPath(p, hasSrc));
+      } catch {
+        // ignora caminhos inválidos
+      }
+    }
+  // Garante que a página principal sempre pode ser editada (single-page landing)
+  normalizedAllowed.add(hasSrc ? "src/app/page.tsx" : "app/page.tsx");
+  // Permite criar/editar seções na pasta app/
+  normalizedAllowed.add(hasSrc ? "src/app/*" : "app/*");
+    const finalAllowed = Array.from(normalizedAllowed);
+    state.data.allowedPaths = finalAllowed;
 
-    // Editor agent reusing PROMPT, but informing EDIT MODE constraints
+    // Editor agent uses dedicated EDIT_PROMPT to enforce non-destructive edits
     const editorAgent = createAgent<AgentState>({
       name: "code-editor",
       description: "Edit only the allowed files for the requested change",
-      system:
-        `${PROMPT}\n\nIMPORTANT:\n- You are in EDIT MODE.\n- Only modify the following files:\n${allowedPaths
-          .map((p) => `- ${p}`)
-          .join("\n")}\n- Do NOT create new files unless strictly necessary; prefer editing existing allowed files.\n- Keep the rest of the project unchanged.`,
+  system: `${EDIT_PROMPT}\n\nAllowed files:\n${(state.data.allowedPaths || []).map((p) => `- ${p}`).join("\n")}`,
       model: azureOpenAICompat({
         endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
         apiKey: process.env.AZURE_OPENAI_API_KEY!,
@@ -1029,23 +1393,32 @@ export const codeAgentEditFunction = inngest.createFunction(
               try {
                 const updatedFiles = network.state.data.files || {};
                 const sandbox = await getSandbox(sandboxId);
-                const guard = new Set(network.state.data.allowedPaths || []);
+                const hasSrc = Object.keys(updatedFiles).some((p) => p.startsWith("src/"));
+                const guard = new Set<string>((network.state.data.allowedPaths || []) as string[]);
                 for (const file of files) {
-                  if (guard.size > 0 && !guard.has(file.path)) {
-                    console.warn(`[edit-guard] blocked write to ${file.path}`);
+                  let normalized = normalizeSandboxPath(file.path, hasSrc);
+                  normalized = mapComponentPath(normalized);
+                  if (!isPathAllowed(normalized, guard)) {
+                    console.warn(`[edit-guard] blocked write to ${normalized}`);
                     continue;
                   }
-                  if (
-                    /app\/page\.(tsx|jsx|ts|js)$/i.test(file.path) &&
-                    DEFAULT_NEXT_TEMPLATE_RE.test(file.content)
-                  ) {
-                    console.warn(
-                      "Template guard: skipping overwrite of app/page.* with Next.js starter content"
-                    );
+                  if (/\/demo\.(tsx|jsx|ts|js)$/i.test(normalized)) {
+                    console.warn(`[policy] demo files are not allowed: ${normalized}`);
                     continue;
                   }
-                  await sandbox.files.write(file.path, file.content);
-                  updatedFiles[file.path] = file.content;
+                  // Light guard: prevent removing critical sections inadvertently
+                  if (/^app\/page\.(tsx|jsx|ts|js)$/i.test(normalized)) {
+                    const prev = typeof updatedFiles[normalized] === "string"
+                      ? (updatedFiles[normalized] as string)
+                      : await (async () => { try { return await sandbox.files.read(normalized); } catch { return ""; } })();
+                    if (prev) {
+                      const v = violatesCriticalSections(prev, file.content);
+                      if (v) return `Blocked edit to ${normalized}: ${v}`;
+                    }
+                  }
+                  const finalContent = normalizeAppFileContent(normalized, file.content);
+                  await sandbox.files.write(normalized, finalContent);
+                  updatedFiles[normalized] = finalContent;
                 }
                 return updatedFiles;
               } catch (error) {
@@ -1058,6 +1431,40 @@ export const codeAgentEditFunction = inngest.createFunction(
           },
         }),
         createTool({
+          name: "safeUpdatePage",
+          description: "Non-destructive update for app/page.*. Inserts a component into <main> and ensures import; preserves the rest of the file.",
+          parameters: z.object({
+            filePath: z.string().default("app/page.tsx"),
+            importLine: z.string(),
+            jsx: z.string(),
+            position: z.enum(["prepend", "append"]).default("append"),
+          }),
+          handler: async ({ filePath, importLine, jsx, position }, { step, network }) => {
+            return await step?.run("safeUpdatePage", async () => {
+              const sandbox = await getSandbox(sandboxId);
+              const path = normalizeSandboxPath(filePath, false);
+              const guard = new Set<string>((network.state.data.allowedPaths || []) as string[]);
+              if (!isPathAllowed(path, guard)) return `Blocked: ${path} not in allowedPaths.`;
+              let prev = "";
+              try { prev = await sandbox.files.read(path); } catch {}
+              if (!prev) {
+                prev = `"use client";\n\nexport default function Page(){\n  return (<main className=\"min-h-screen w-full\">{\"\"}</main>);\n}\n`;
+              }
+              const filesState = (network.state.data.files || {}) as Record<string, string>;
+              const importPreferred = sanitizeUiImportToApp(importLine, filesState);
+              const sanitized = sanitizeDemoImport(importPreferred, jsx, filesState);
+              const adjusted = ensureUniqueAlias(sanitized.importLine, prev, sanitized.jsx);
+              const fixedImport = adjusted.importLine;
+              const fixedJsx = adjusted.jsx;
+              let next = ensureImportLine(prev, fixedImport);
+              next = insertJsxIntoMain(next, fixedJsx, position);
+              await sandbox.files.write(path, next);
+              network.state.data.files[path] = next;
+              return `Updated ${path} with safe merge`;
+            });
+          },
+        }),
+        createTool({
           name: "readFiles",
           description: "Read files from the sandbox",
           parameters: z.object({ files: z.array(z.string()) }),
@@ -1066,9 +1473,23 @@ export const codeAgentEditFunction = inngest.createFunction(
               try {
                 const sandbox = await getSandbox(sandboxId);
                 const contents: any[] = [];
+                // Usa presença de src/ no sandbox a partir do estado do editor (poderia estar vazio, cairá em false)
+                // Não temos network aqui, então fazemos tentativa com heurística básica: se caminho começa com '@/'
+                const hasSrcHeuristic = files.some((p) => p.startsWith("@/"));
                 for (const f of files) {
-                  const content = await sandbox.files.read(f);
-                  contents.push({ path: f, content });
+                  const p = normalizeSandboxPath(f, hasSrcHeuristic);
+                  try {
+                    const content = await sandbox.files.read(p);
+                    contents.push({ path: p, content });
+                  } catch (e: any) {
+                    const msg = String(e?.message || e);
+                    if (/NotFound/i.test(msg)) {
+                      console.warn(`[readFiles] not found: ${p}`);
+                      contents.push({ path: p, content: null });
+                      continue;
+                    }
+                    throw e;
+                  }
                 }
                 return JSON.stringify(contents);
               } catch (error) {
@@ -1106,7 +1527,7 @@ export const codeAgentEditFunction = inngest.createFunction(
 
     const enrichedInstruction = [
       (event.data as any).value,
-      `Only edit: ${allowedPaths.join(", ")}`,
+      `Only edit: ${(state.data.allowedPaths || []).join(", ")}`,
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -1161,7 +1582,7 @@ export const codeAgentEditFunction = inngest.createFunction(
         await prisma.message.create({
           data: {
             projectId: (event.data as any).projectId,
-            content: "Something went wrong. Please try again.",
+            content: "Alguma coisa deu errado, tente novamente! ",
             role: "ASSISTANT",
             type: "ERROR",
           },
