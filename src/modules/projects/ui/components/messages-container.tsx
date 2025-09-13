@@ -52,6 +52,7 @@ const MessagesContainer = ({
 
   const lastMessage = messages?.[messages?.length - 1];
   const isLastMessageUser = lastMessage?.role === "USER";
+  const isProcessing = isLastMessageUser;
 
   return (
     <div className="flex flex-col flex-1 min-h-0 bg-white dark:bg-sidebar">
@@ -83,6 +84,7 @@ const MessagesContainer = ({
           isEditing={!!isEditing}
           onToggleEditing={() => setIsEditing?.(!isEditing)}
           getEdits={getEdits}
+          isProcessing={isProcessing}
         />
       </div>
     </div>

@@ -560,8 +560,9 @@ export const codeAgentFunction = inngest.createFunction(
               if (!isPathAllowed(path, guard)) return `Blocked: ${path} not in allowedPaths.`;
               let prev = "";
               try { prev = await sandbox.files.read(path); } catch {}
-              if (!prev) {
-                prev = `"use client";\n\nexport default function Page(){\n  return (<main className=\"min-h-screen w-full\">{\"\"}</main>);\n}\n`;
+              // If file missing or it's the default Next.js starter, start from a minimal shell
+              if (!prev || DEFAULT_NEXT_TEMPLATE_RE.test(prev)) {
+                prev = `"use client";\n\nexport default function Page(){\n  return (<main className=\"min-h-screen w-full\"></main>);\n}\n`;
               }
               // First, prefer local app/<PascalCase> if exists for any ui import
               const importPreferred = sanitizeUiImportToApp(importLine, filesState as Record<string, string>);

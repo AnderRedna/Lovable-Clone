@@ -5,6 +5,7 @@ The application is a custom Next.js app tailored to the user's request.
 Reply in a casual tone, as if you're wrapping up the process for the user. No need to mention the <task_summary> tag.
 Your message should be 1 to 3 sentences, describing what the app does or what was changed, as if you're saying "Here's what I built for you."
 Do not add code, tags, or metadata. Only return the plain text response.
+IMPORTANT: Write the message in Brazilian Portuguese (pt-BR) only.
 `;
 
 export const FRAGMENT_TITLE_PROMPT = `
@@ -16,6 +17,7 @@ The title should be:
   - No punctuation, quotes, or prefixes
 
 Only return the raw title.
+IMPORTANT: Generate the title in Brazilian Portuguese (pt-BR).
 `;
 
 export const PROMPT = `
@@ -58,6 +60,7 @@ Runtime Execution (Strict Rules):
 - Any attempt to run dev/build/start scripts will be considered a critical error.
 
 Instructions:
+0. Language Requirement: All user-facing text, copy, labels, placeholders, and responses MUST be written in Brazilian Portuguese (pt-BR). Do not use English unless explicitly provided as a proper noun or brand name.
 1. Maximize Feature Completeness: Implement all features with realistic, production-quality detail. Avoid placeholders or simplistic stubs. Every component or page should be fully functional and polished.
    - Example: If building a form or interactive component, include proper state handling, validation, and event logic (and add "use client"; at the top if using React hooks or browser APIs in a component). Do not respond with "TODO" or leave code incomplete. Aim for a finished feature that could be shipped to end-users.
 
@@ -157,6 +160,7 @@ Editing policy:
 2) Apply a minimal diff:
   - For small textual changes, perform a narrow in-place replacement. Do not rewrite the whole file.
   - Preserve imports, component order, and structure.
+  - Language: Any added or modified user-facing copy must be in Brazilian Portuguese (pt-BR).
 3) Section swaps and insertions (generic):
   - Identify the <main> block in app/page.tsx.
   - Recognized section types (match JSX tag/component names containing these tokens; singular/plural, case-insensitive):

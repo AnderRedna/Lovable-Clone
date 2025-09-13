@@ -13,19 +13,22 @@ import { Form, FormField } from "@/components/ui/form";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 import { Usage } from "./usage";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface MessageFormProps {
   projectId: string;
   isEditing?: boolean;
   onToggleEditing?: () => void;
   getEdits?: () => Array<{ selector: string; oldText: string; newText: string }>;
+  // Sinaliza que há uma solicitação em processamento; permite digitar, mas bloqueia envio
+  isProcessing?: boolean;
 }
 
 const formSchema = z.object({
   value: z.string().min(1, { message: "Value is required" }),
 });
 
-const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits }: MessageFormProps) => {
+const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits, isProcessing = false }: MessageFormProps) => {
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -59,11 +62,19 @@ const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits }: Messag
   );
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
+    if (isProcessing) {
+      toast.info("Aguarde finalizar a última solicitação.");
+      return;
+    }
     await createMessage.mutateAsync({ value: values.value, projectId });
   };
 
   const saveInlineEdits = async () => {
     try {
+      if (isProcessing) {
+        toast.info("Aguarde finalizar a última solicitação.");
+        return;
+      }
       // Ask preview iframe to flush edits, then wait a tick
       try {
         const iframe: HTMLIFrameElement | null = document.querySelector('iframe[data-preview-iframe]');
@@ -88,7 +99,7 @@ const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits }: Messag
   const [isFocused, setIsFocused] = useState(false);
   const showUsage = !!usage;
   const isPending = createMessage.isPending;
-  const isDisabled = isPending || !form.formState.isValid;
+  const isDisabled = isPending || isProcessing || !form.formState.isValid;
 
   return (
     <Form {...form}>
@@ -167,19 +178,34 @@ const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits }: Messag
               </Button>
             </>
           )}
-          <Button
-            className={cn(
-              "size-8 rounded-full",
-              isDisabled && "bg-muted-foreground border"
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                className={cn(
+                  "size-8 rounded-full",
+                  isDisabled && "bg-muted-foreground border"
+                )}
+                disabled={isDisabled}
+                onClick={(e) => {
+                  if (isProcessing) {
+                    e.preventDefault();
+                    toast.info("Aguarde finalizar a última solicitação.");
+                  }
+                }}
+              >
+                {isPending ? (
+                  <Loader2Icon className="animate-spin" />
+                ) : (
+                  <ArrowUpIcon />
+                )}
+              </Button>
+            </TooltipTrigger>
+            {isProcessing && (
+              <TooltipContent sideOffset={6}>
+                Aguarde finalizar a última solicitação
+              </TooltipContent>
             )}
-            disabled={isDisabled}
-          >
-            {isPending ? (
-              <Loader2Icon className="animate-spin" />
-            ) : (
-              <ArrowUpIcon />
-            )}
-          </Button>
+          </Tooltip>
         </div>
       </form>
     </Form>
