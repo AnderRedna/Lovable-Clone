@@ -10,7 +10,13 @@ import {
 import { z } from "zod";
 
 import prisma from "@/lib/prisma";
-import { FRAGMENT_TITLE_PROMPT, PROMPT, RESPONSE_PROMPT, EDIT_PROMPT } from "@/prompt";
+import {
+  EDIT_PROMPT,
+  FRAGMENT_TITLE_PROMPT,
+  PROMPT,
+  RESPONSE_PROMPT,
+  TASK_STEPS_PROMPT,
+} from "@/prompt";
 import { FileCollection } from "@/types";
 import { inngest } from "./client";
 import {
@@ -676,6 +682,41 @@ export const codeAgentFunction = inngest.createFunction(
     ]
       .filter(Boolean)
       .join("");
+
+    const taskStepsGenerator = createAgent({
+      name: "task-steps-generator",
+      description: "A task steps generator",
+      system: TASK_STEPS_PROMPT,
+      model: azureOpenAICompat({
+        endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
+        apiKey: process.env.AZURE_OPENAI_API_KEY!,
+        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
+        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
+        defaultParameters: {
+          temperature: 0.1,
+        },
+      }),
+    });
+
+    const { output: taskStepsOutput } = await taskStepsGenerator.run(
+      enrichedInstruction
+    );
+    logAssistantTexts("task-steps-generator", taskStepsOutput);
+    console.log("Completed taskStepsGenerator.run");
+
+    await step.run("save-steps", async () => {
+      console.log("Running save-steps");
+      const stepsMessage = await prisma.message.create({
+        data: {
+          projectId: event.data.projectId,
+          content: parseAgentOutput(taskStepsOutput),
+          role: "ASSISTANT",
+          type: "STEPS",
+        },
+      });
+      console.log("Completed save-steps", stepsMessage.id);
+      return stepsMessage;
+    });
 
     const result = await network.run(enrichedInstruction, { state });
     console.log("Completed network.run", result.state.data.summary ? "success" : "error");
@@ -1344,6 +1385,48 @@ export const codeAgentEditFunction = inngest.createFunction(
   normalizedAllowed.add(hasSrc ? "src/app/*" : "app/*");
     const finalAllowed = Array.from(normalizedAllowed);
     state.data.allowedPaths = finalAllowed;
+
+    const enrichedInstructionForSteps = [
+      (event.data as any).value,
+      `Only edit: ${(state.data.allowedPaths || []).join(", ")}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    const taskStepsGenerator = createAgent({
+      name: "task-steps-generator",
+      description: "A task steps generator",
+      system: TASK_STEPS_PROMPT,
+      model: azureOpenAICompat({
+        endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
+        apiKey: process.env.AZURE_OPENAI_API_KEY!,
+        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
+        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
+        defaultParameters: {
+          temperature: 0.1,
+        },
+      }),
+    });
+
+    const { output: taskStepsOutput } = await taskStepsGenerator.run(
+      enrichedInstructionForSteps
+    );
+    logAssistantTexts("task-steps-generator", taskStepsOutput);
+    console.log("Completed taskStepsGenerator.run for edit");
+
+    await step.run("save-steps-for-edit", async () => {
+      console.log("Running save-steps-for-edit");
+      const stepsMessage = await prisma.message.create({
+        data: {
+          projectId: (event.data as any).projectId,
+          content: parseAgentOutput(taskStepsOutput),
+          role: "ASSISTANT",
+          type: "STEPS",
+        },
+      });
+      console.log("Completed save-steps-for-edit", stepsMessage.id);
+      return stepsMessage;
+    });
 
     // Editor agent uses dedicated EDIT_PROMPT to enforce non-destructive edits
     const editorAgent = createAgent<AgentState>({

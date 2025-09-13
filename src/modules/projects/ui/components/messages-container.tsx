@@ -6,6 +6,7 @@ import { useTRPC } from "@/trpc/client";
 import { MessageCard } from "./message-card";
 import { MessageForm } from "./message-form";
 import { MessageLoading } from "./message-loading";
+import { StepsCard } from "./steps-card";
 
 interface MessagesContainerProps {
   projectId: string;
@@ -52,26 +53,70 @@ const MessagesContainer = ({
 
   const lastMessage = messages?.[messages?.length - 1];
   const isLastMessageUser = lastMessage?.role === "USER";
-  const isProcessing = isLastMessageUser;
+
+  const stepsMessage = messages?.findLast(
+    (message) => message.type === "STEPS"
+  );
+  let steps;
+  try {
+    if (stepsMessage) {
+      steps = JSON.parse(stepsMessage.content);
+    }
+  } catch (e) {
+    console.error("Failed to parse steps", e);
+  }
+
+  // Keep processing UI while we have steps and no final result/error after them
+  const stepsIndex = stepsMessage && messages ? messages.findIndex((m) => m.id === stepsMessage.id) : -1;
+  const hasFinalAfterSteps =
+    stepsIndex !== -1 && messages
+      ? messages.slice(stepsIndex + 1).some((m) => m.type === "RESULT" || m.type === "ERROR")
+      : false;
+
+  const isProcessing = isLastMessageUser || (!!stepsMessage && !hasFinalAfterSteps);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 bg-white dark:bg-sidebar">
       <div className="flex-1 min-h-0 overflow-auto">
         <div className="pt-2 pr-1">
-          {messages?.map((message) => (
-            <MessageCard
-              key={message.id}
-              content={message.content}
-              role={message.role}
-              fragment={message.fragment}
-              createdAt={message.createdAt}
-              isActiveFragment={activeFragment?.id === message.fragment?.id}
-              onFragmentClick={() => setActiveFragment(message.fragment)}
-              type={message.type}
-            />
-          ))}
+          {messages?.map((message) => {
+            if (message.type === "STEPS") {
+              let parsed: string[] | undefined;
+              try {
+                parsed = JSON.parse(message.content);
+              } catch {}
+              const finalAfterThis = messages
+                ? messages
+                    .slice(messages.findIndex((m) => m.id === message.id) + 1)
+                    .some((m) => m.type === "RESULT" || m.type === "ERROR")
+                : false;
+              return parsed ? (
+                <StepsCard
+                  key={message.id}
+                  steps={parsed}
+                  messageId={message.id}
+                  forceComplete={finalAfterThis}
+                />
+              ) : null;
+            }
+            return (
+              <MessageCard
+                key={message.id}
+                content={message.content}
+                role={message.role}
+                fragment={message.fragment}
+                createdAt={message.createdAt}
+                isActiveFragment={
+                  activeFragment?.id === message.fragment?.id
+                }
+                onFragmentClick={() => setActiveFragment(message.fragment)}
+                type={message.type}
+              />
+            );
+          })}
 
-          {isLastMessageUser && <MessageLoading />}
+          {/* Show loader only before steps are available */}
+          {isProcessing && !stepsMessage && <MessageLoading steps={steps} />}
 
           <div ref={bottomRef} />
         </div>

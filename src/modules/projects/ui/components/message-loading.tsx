@@ -1,41 +1,86 @@
+import { CheckCircle, Loader } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useState } from "react";
 
-const ShimmerMessages = () => {
-  const messages = [
-    "Pensando em algo genial...",
-    "Carregando a magia...",
-    "Gerando ideias incríveis...",
-    "Analisando sua solicitação com um café...",
-    "Construindo seu site como um mestre...",
-    "Criando componentes com amor...",
-    "Otimizando layout para impressionar...",
-    "Adicionando toques finais de mestre...",
-    "Quase pronto, aguente firme...",
-  ];
+interface Step {
+  text: string;
+  state: "pending" | "completed";
+}
 
-  const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
+const ShimmerMessages = ({ steps: stepsProp }: { steps?: string[] }) => {
+  const [steps, setSteps] = useState<Step[]>([]);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentMessageIndex((prev) => (prev + 1) % messages.length);
-    }, 2000);
+    if (stepsProp?.length) {
+      setSteps(stepsProp.map((s) => ({ text: s, state: "pending" })));
+    }
+  }, [stepsProp]);
 
-    return () => {
-      clearInterval(interval);
-    };
-  }, [messages.length]);
+  useEffect(() => {
+    if (steps.length > 0) {
+      const totalDuration = 120000; // 2 minutes
+      const stepDuration = totalDuration / (steps.length || 1);
+
+      const stepInterval = setInterval(() => {
+        setSteps((currentSteps) => {
+          const nextPendingIndex = currentSteps.findIndex(
+            (s) => s.state === "pending"
+          );
+          if (nextPendingIndex !== -1) {
+            const newSteps = [...currentSteps];
+            // Do not complete the last step
+            if (nextPendingIndex < newSteps.length - 1) {
+              newSteps[nextPendingIndex] = {
+                ...newSteps[nextPendingIndex],
+                state: "completed",
+              };
+              return newSteps;
+            }
+          }
+          return currentSteps;
+        });
+      }, stepDuration);
+
+      return () => clearInterval(stepInterval);
+    }
+  }, [steps]);
+
+  if (!steps.length) {
+    return (
+      <div className="flex items-center gap-2">
+        <Loader className="h-4 w-4 text-muted-foreground animate-spin" />
+        <span className="text-base text-muted-foreground animate-pulse">
+          Pensando nas próximas etapas...
+        </span>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-base text-muted-foreground animate-pulse">
-        {messages[currentMessageIndex]}
-      </span>
+    <div className="flex flex-col gap-y-2">
+      {steps.map((step, index) => (
+        <div key={index} className="flex items-center gap-2">
+          {step.state === "completed" ? (
+            <CheckCircle className="h-4 w-4 text-green-500" />
+          ) : (
+            <Loader className="h-4 w-4 text-muted-foreground animate-spin" />
+          )}
+          <span
+            className={`text-base ${
+              step.state === "completed"
+                ? "text-muted-foreground/80"
+                : "text-muted-foreground animate-pulse"
+            }`}
+          >
+            {step.text}
+          </span>
+        </div>
+      ))}
     </div>
   );
 };
 
-const MessageLoading = () => {
+const MessageLoading = ({ steps }: { steps?: string[] }) => {
   return (
     <div className="flex flex-col group px-2 pb-4">
       <div className="flex items-center gap-2 pl-2 mb-2">
@@ -49,7 +94,7 @@ const MessageLoading = () => {
         <span className="text-sm font-medium">Landinfy</span>
       </div>
       <div className="pl-8.5 flex flex-col gap-y-4">
-        <ShimmerMessages />
+        <ShimmerMessages steps={steps} />
       </div>
     </div>
   );
