@@ -8,17 +8,21 @@ import {
   TabletIcon,
   SmartphoneIcon,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 interface FragmentWebProps {
   data: Fragment;
+  isEditing?: boolean;
+  registerCollector?: (collector: () => Array<{ selector: string; oldText: string; newText: string }>) => void;
 }
 
-const FragmentWeb = ({ data }: FragmentWebProps) => {
+const FragmentWeb = ({ data, isEditing, registerCollector }: FragmentWebProps) => {
   const [fragmentKey, setFragmentKey] = useState(0);
   const [device, setDevice] = useState<"desktop" | "tablet" | "mobile">(
     "desktop"
   );
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const editsRef = useRef<Array<{ selector: string; oldText: string; newText: string }>>([]);
 
   const onRefresh = () => {
     setFragmentKey((prev) => prev + 1);
@@ -34,6 +38,68 @@ const FragmentWeb = ({ data }: FragmentWebProps) => {
         return undefined; // full width
     }
   }, [device]);
+
+  const proxiedUrl = useMemo(() => {
+    const base = "/api/preview-proxy";
+    const u = new URL(base, window.location.origin);
+    u.searchParams.set("url", data.sandboxUrl || "");
+    if (isEditing) u.searchParams.set("edit", "1");
+    return u.toString();
+  }, [data.sandboxUrl, isEditing]);
+
+  useEffect(() => {
+    function onMsg(ev: MessageEvent) {
+      const d = (ev && ev.data) || {};
+      if (d && d.type === "proxy-ready") {
+        // once proxy is ready, send current editing state
+        const iframe = iframeRef.current;
+        if (iframe) {
+          setTimeout(() => {
+            try {
+              iframe.contentWindow?.postMessage(
+                { type: isEditing ? "enable-editing" : "disable-editing" },
+                "*"
+              );
+            } catch {}
+          }, 100);
+        }
+      }
+      if (d && d.type === "inline-edits" && Array.isArray(d.edits)) {
+        editsRef.current = d.edits.map((e: any) => ({ selector: e.selector, oldText: e.oldText, newText: e.newText }));
+      }
+    }
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
+  useEffect(() => {
+    if (!registerCollector) return;
+    registerCollector(() => editsRef.current.filter(e => e.oldText !== e.newText));
+  }, [registerCollector]);
+
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    const send = (msg: any) => {
+      try {
+        iframe.contentWindow?.postMessage(msg, "*");
+      } catch {}
+    };
+    const onLoad = () => {
+      // small delay avoids hydration races inside the sandbox
+      setTimeout(() => {
+        if (isEditing) send({ type: "enable-editing" });
+        else send({ type: "disable-editing" });
+      }, 150);
+    };
+    iframe.addEventListener("load", onLoad);
+    // Also send immediately in case of bfcache
+    // but defer a tick to avoid running before contentWindow is ready
+    setTimeout(onLoad, 50);
+    return () => {
+      try { iframe.removeEventListener("load", onLoad); } catch {}
+    };
+  }, [isEditing, proxiedUrl]);
 
   return (
     <div className="flex flex-col w-full h-full">
@@ -97,10 +163,12 @@ const FragmentWeb = ({ data }: FragmentWebProps) => {
           style={{ width: previewWidth ?? "100%" }}
         >
           <iframe
+            data-preview-iframe
+            ref={iframeRef}
             key={fragmentKey}
             className="h-full w-full"
             loading="lazy"
-            src={data.sandboxUrl}
+            src={isEditing ? proxiedUrl : data.sandboxUrl}
           />
         </div>
       </div>

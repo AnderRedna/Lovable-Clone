@@ -3,7 +3,7 @@
 import { useAuth } from "@clerk/nextjs";
 import { CodeIcon, CrownIcon, EyeIcon } from "lucide-react";
 import Link from "next/link";
-import { Suspense, useState } from "react";
+import { Suspense, useRef, useState } from "react";
 
 import { FileExplorer } from "@/components/file-explorer";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,36 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
 
   const [activeFragment, setActiveFragment] = useState<Fragment | null>(null);
   const [tabState, setTabState] = useState<"preview" | "code">("preview");
+  const [isEditing, setIsEditing] = useState(false);
+  const collectorRef = useRef<() => Array<{ selector: string; oldText: string; newText: string }>>(() => []);
+
+  const registerCollector = (
+    collector: () => Array<{ selector: string; oldText: string; newText: string }>
+  ) => {
+    collectorRef.current = collector;
+  };
+
+  async function handleSaveEdits() {
+    try {
+      const edits = collectorRef.current?.() || [];
+      setIsEditing(false);
+      if (!edits.length) return;
+      // Create a user message instructing the agent to apply textual replacements
+      const instructions = [
+        "Aplique as seguintes substituições de texto nos arquivos do projeto (apenas literais de texto em TSX/JSX/HTML/MD/JSON). Não altere lógica ou estrutura de componentes.",
+        ...edits.map((e, i) => `${i + 1}) \"${e.oldText}\" -> \"${e.newText}\" (selector: ${e.selector})`),
+      ].join("\n");
+
+      // Lazy import to avoid client/server split issues
+      const { useTRPC } = await import("@/trpc/client");
+      // useTRPC is a hook; but we are in a component function scope.
+      // Instead of calling here, forward save to MessageForm via props and let it send.
+      // noop here; MessageForm will handle sending when onSaveEdits is invoked.
+      return instructions as unknown as void;
+    } finally {
+      // no-op
+    }
+  }
 
   return (
     <div className="h-screen">
@@ -53,6 +83,9 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
                 projectId={projectId}
                 activeFragment={activeFragment}
                 setActiveFragment={setActiveFragment}
+                isEditing={isEditing}
+                setIsEditing={setIsEditing}
+                getEdits={() => collectorRef.current?.() || []}
               />
             </Suspense>
           </ErrorBoundary>
@@ -91,7 +124,15 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
               </div>
             </div>
             <TabsContent value="preview">
-              {activeFragment ? <FragmentWeb data={activeFragment} /> : <FeedbackForm />}
+              {activeFragment ? (
+                <FragmentWeb
+                  data={activeFragment}
+                  isEditing={isEditing}
+                  registerCollector={(c) => registerCollector(c)}
+                />
+              ) : (
+                <FeedbackForm />
+              )}
             </TabsContent>
             <TabsContent value="code" className="min-h-0">
               {activeFragment?.files ? (

@@ -1,4 +1,5 @@
 import { format } from "date-fns";
+import { useState } from "react";
 import Image from "next/image";
 
 import { Card } from "@/components/ui/card";
@@ -10,6 +11,10 @@ interface UserMessageProps {
 }
 
 const UserMessage = ({ content }: UserMessageProps) => {
+  const edits = parseInlineEdits(content);
+  if (edits) {
+    return <InlineEditsMessage edits={edits} />;
+  }
   return (
     <div className="flex justify-end pb-4 pr-2 pl-10">
       <Card className="rounded-lg bg-muted p-3 shadow-none border-none max-w-4/5 break-words">
@@ -103,3 +108,50 @@ const MessageCard = ({
 };
 
 export { MessageCard };
+
+// Helpers
+type EditPair = { oldText: string; newText: string };
+
+function parseInlineEdits(content: string): EditPair[] | null {
+  if (!content) return null;
+  const header = "Aplique as seguintes substituições de texto";
+  if (!content.includes(header)) return null;
+  const lines = content.split(/\n|\r/).map((s) => s.trim()).filter(Boolean);
+  const pairs: EditPair[] = [];
+  for (const line of lines) {
+    const m = line.match(/^\s*\d+\)\s*"([\s\S]*?)"\s*->\s*"([\s\S]*?)"/);
+    if (m) {
+      const [, oldText, newText] = m;
+      pairs.push({ oldText, newText });
+    }
+  }
+  return pairs.length ? pairs : null;
+}
+
+function InlineEditsMessage({ edits }: { edits: EditPair[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex justify-end pb-4 pr-2 pl-10">
+      <Card className="rounded-lg bg-muted p-3 shadow-none border max-w-4/5 w-full">
+        <button
+          type="button"
+          className="w-full text-left font-medium"
+          onClick={() => setOpen((v) => !v)}
+        >
+          Alteração de textos {open ? "▲" : "▼"}
+        </button>
+        {open && (
+          <div className="mt-3 space-y-2">
+            {edits.map((e, idx) => (
+              <div key={idx} className="text-sm">
+                <span className="text-muted-foreground">De:</span> {e.oldText}
+                <span className="mx-2">→</span>
+                <span className="text-muted-foreground">Para:</span> {e.newText}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}

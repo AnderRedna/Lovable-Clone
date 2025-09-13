@@ -11,12 +11,18 @@ interface MessagesContainerProps {
   projectId: string;
   activeFragment: Fragment | null;
   setActiveFragment: (activeFragment: Fragment | null) => void;
+  isEditing?: boolean;
+  setIsEditing?: (v: boolean) => void;
+  getEdits?: () => Array<{ selector: string; oldText: string; newText: string }>;
 }
 
 const MessagesContainer = ({
   activeFragment,
   projectId,
   setActiveFragment,
+  isEditing,
+  setIsEditing,
+  getEdits,
 }: MessagesContainerProps) => {
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastAssistantMessageIdRef = useRef<string | null>(null);
@@ -72,7 +78,12 @@ const MessagesContainer = ({
 
       <div className="relative p-3 pt-1">
         <div className="absolute -top-6 left-0 right-0 h-6 bg-gradient-to-b from-transparent to-background pointer-events-none" />
-        <MessageForm projectId={projectId} />
+        <MessageForm
+          projectId={projectId}
+          isEditing={!!isEditing}
+          onToggleEditing={() => setIsEditing?.(!isEditing)}
+          getEdits={getEdits}
+        />
       </div>
     </div>
   );

@@ -16,13 +16,16 @@ import { Usage } from "./usage";
 
 interface MessageFormProps {
   projectId: string;
+  isEditing?: boolean;
+  onToggleEditing?: () => void;
+  getEdits?: () => Array<{ selector: string; oldText: string; newText: string }>;
 }
 
 const formSchema = z.object({
   value: z.string().min(1, { message: "Value is required" }),
 });
 
-const MessageForm = ({ projectId }: MessageFormProps) => {
+const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits }: MessageFormProps) => {
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -56,10 +59,30 @@ const MessageForm = ({ projectId }: MessageFormProps) => {
   );
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
-    await createMessage.mutateAsync({
-      value: values.value,
-      projectId,
-    });
+    await createMessage.mutateAsync({ value: values.value, projectId });
+  };
+
+  const saveInlineEdits = async () => {
+    try {
+      // Ask preview iframe to flush edits, then wait a tick
+      try {
+        const iframe: HTMLIFrameElement | null = document.querySelector('iframe[data-preview-iframe]');
+        iframe?.contentWindow?.postMessage({ type: "collect-edits" }, "*");
+      } catch {}
+      await new Promise((r) => setTimeout(r, 50));
+      const edits = getEdits?.() || [];
+      if (edits.length === 0) return;
+      const value = [
+        "Aplique as seguintes substituições de texto nos arquivos do projeto (apenas literais de texto em TSX/JSX/HTML/MD/JSON). Não altere lógica ou estrutura de componentes.",
+        ...edits.map(
+          (e, i) => `${i + 1}) \"${e.oldText}\" -> \"${e.newText}\" (selector: ${e.selector})`
+        ),
+      ].join("\n");
+      await createMessage.mutateAsync({ value, projectId });
+      onToggleEditing?.();
+    } catch (e) {
+      // ignore
+    }
   };
 
   const [isFocused, setIsFocused] = useState(false);
@@ -83,6 +106,7 @@ const MessageForm = ({ projectId }: MessageFormProps) => {
           showUsage && "rounded-t-none"
         )}
       >
+
         <FormField
           control={form.control}
           name="value"
@@ -107,6 +131,42 @@ const MessageForm = ({ projectId }: MessageFormProps) => {
         />
 
   <div className="flex gap-x-2 items-end justify-end pt-2">
+          {!isEditing && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              title="Editar textos"
+              onClick={() => onToggleEditing?.()}
+              className="bg-white border-2 border-white text-white hover:bg-white/10"
+            >
+              <span style={{ fontWeight: 700 }}>T</span>
+            </Button>
+          )}
+          {isEditing && (
+            <>
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                title="Cancelar edição"
+                onClick={() => onToggleEditing?.()}
+                className="h-8 border-0 bg-red-600 hover:bg-red-700"
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                title="Salvar alterações"
+                onClick={saveInlineEdits}
+                className="h-8 border-0"
+              >
+                Salvar
+              </Button>
+            </>
+          )}
           <Button
             className={cn(
               "size-8 rounded-full",
