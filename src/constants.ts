@@ -42,10 +42,10 @@ export const PROJECT_TEMPLATES = [
       "Create an app landing page with screenshots, download buttons, user reviews, and FAQs. Focus on app store badges, responsive images, and a user-centric design.",
   },
   {
-    emoji: "🛒",
-    title: "Para e-commerce",
+    emoji: "⏳",
+    title: "Para waitlist",
     prompt:
-      "Design an e-commerce landing page with product showcases, shopping cart preview, customer testimonials, and a secure checkout teaser. Prioritize trust signals and seamless navigation.",
+      "Create a waitlist landing page with an email sign-up form, benefits of early access, social proof from influencers or beta users, and a launch countdown. Use compelling visuals, urgency elements, and persuasive copy to drive sign-ups.",
   },
 ] as const;
 

@@ -193,6 +193,8 @@ Created a blog layout with a responsive sidebar, a dynamic list of articles, and
 - Ending without printing <task_summary>
 
 This is the ONLY valid way to terminate your task. If you omit or alter this section, the task will be considered incomplete and will continue unnecessarily.
+
+Today's date is ${new Date().toLocaleDateString('en-US')}.
 `;
 
 export const EDIT_PROMPT = `
@@ -282,4 +284,23 @@ After completing all tool calls, return ONLY:
 <task_summary>
 A short, high-level summary of what was changed.
 </task_summary>
+`;
+
+export const IMPROVE_PROMPT = `
+You are an assistant that improves user prompts for creating landing pages.
+
+Given the user's prompt: {user_prompt}
+
+Improve it by making it more detailed, structured, and following the style of the existing templates in constants.ts.
+
+Examples of improved prompts:
+- Original: "landing page for my app"
+  Improved: "Create an app landing page with screenshots, download buttons, user reviews, and FAQs. Focus on app store badges, responsive images, and a user-centric design."
+
+- Original: "website for my business"
+  Improved: "Create a business landing page with sections for services, about us, client logos, contact form, and a navigation bar. Emphasize professionalism with balanced spacing, typography, and call-to-action placements."
+
+Make sure the improved prompt is in Brazilian Portuguese (pt-BR) and includes elements like hero section, features, testimonials, etc., to make it comprehensive.
+
+Output only the improved prompt, nothing else.
 `;

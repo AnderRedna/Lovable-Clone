@@ -3,7 +3,7 @@
 import { useClerk } from "@clerk/nextjs";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpIcon, Loader2Icon, SettingsIcon, ChevronLeft } from "lucide-react";
+import { ArrowUpIcon, Loader2Icon, SettingsIcon, ChevronLeft, SparklesIcon } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import TextareaAutosize from "react-textarea-autosize";
@@ -75,6 +75,28 @@ const ProjectForm = () => {
       shouldTouch: true,
       shouldValidate: true,
     });
+  };
+
+  const improveMutation = useMutation(
+    trpc.prompts.improve.mutationOptions({
+      onError: (error) => {
+        toast.error(error.message || "Não foi possível melhorar o prompt");
+      },
+      onSuccess: (data) => {
+        form.setValue("value", data.value, {
+          shouldDirty: true,
+          shouldTouch: true,
+          shouldValidate: true,
+        });
+        toast.success("Prompt melhorado!");
+      },
+    })
+  );
+
+  const improvePrompt = async () => {
+    const current = form.getValues("value");
+    if (!current.trim()) return;
+    await improveMutation.mutateAsync({ value: current });
   };
 
   const [isFocused, setIsFocused] = useState(false);
@@ -232,21 +254,42 @@ const ProjectForm = () => {
           )}
 
           <div className="flex gap-x-2 items-end justify-between pt-2">
-            <Button
-              variant={isCustomizing ? "default" : "outline"}
-              className="h-6 px-2 text-xs border-2 border-green-700"
-              type="button"
-              onClick={() => {
-                const next = !isCustomizing;
-                setIsCustomizing(next);
-                if (!next) {
-                  resetWizard();
-                }
-              }}
-            >
-              <SettingsIcon className="size-3 mr-1" />
-              Customizar
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant={isCustomizing ? "default" : "outline"}
+                className="h-6 px-2 text-xs border-2 border-green-700"
+                type="button"
+                onClick={() => {
+                  const next = !isCustomizing;
+                  setIsCustomizing(next);
+                  if (!next) {
+                    resetWizard();
+                  }
+                }}
+              >
+                <SettingsIcon className="size-3 mr-1" />
+                Customizar
+              </Button>
+              <Button
+                variant="outline"
+                className="h-6 px-2 text-xs"
+                type="button"
+                onClick={improvePrompt}
+                disabled={improveMutation.isPending}
+              >
+                {improveMutation.isPending ? (
+                  <>
+                    <Loader2Icon className="size-3 mr-1 animate-spin" />
+                    Melhorando
+                  </>
+                ) : (
+                  <>
+                    <SparklesIcon className="size-3 mr-1" />
+                    Melhorar
+                  </>
+                )}
+              </Button>
+            </div>
             <div className="flex items-center gap-2">
               <Button
                 type="button"

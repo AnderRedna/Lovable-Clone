@@ -16,6 +16,12 @@ const FeedbackForm: React.FC = () => {
   });
   const [submitted, setSubmitted] = useState(false);
 
+  const resetForm = () => {
+    setSubmitted(false);
+    setCurrentStep(0);
+    setFormData({ heardFrom: "", experience: "", recommend: "", suggestions: "", outrosText: "" });
+  };
+
   const steps = [
     {
       key: "heardFrom",
@@ -160,7 +166,7 @@ const FeedbackForm: React.FC = () => {
               <ArrowLeft />
               Voltar
             </button>
-            <button type="submit" className="submit-btn" onClick={handleSubmit}>
+            <button type="submit" className="submit-btn">
               Avançar <ChevronRight />
             </button>
           </div>
@@ -172,8 +178,12 @@ const FeedbackForm: React.FC = () => {
   if (submitted) {
     return (
       <div className="feedback-container thank-you">
-        <h2>Obrigado pelo seu feedback!</h2>
-        {/* <p>Seus créditos serão adicionados em breve.</p> */}
+        <h2>Feedback enviado. Obrigado!</h2>
+        <div className="button-group" style={{ marginTop: 12 }}>
+          <button type="button" className="next-btn" onClick={resetForm}>
+            Enviar novo feedback
+          </button>
+        </div>
       </div>
     );
   }

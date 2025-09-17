@@ -20,8 +20,8 @@ import { FragmentWeb } from "../components/fragment-web";
 import { MessagesContainer } from "../components/messages-container";
 import { ProjectHeader } from "../components/project-header";
 import FeedbackForm from "../components/feedback-form";
+import TechFeedbackForm from "../components/tech-feedback-form";
 import { ErrorBoundary } from "react-error-boundary";
-import VibeCoderChallenge from "../components/vibe-coder";
 
 interface ProjectViewProps {
   projectId: string;
@@ -135,11 +135,10 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
               )}
             </TabsContent>
             <TabsContent value="code" className="min-h-0">
+              <TechFeedbackForm />
               {activeFragment?.files ? (
                 <FileExplorer files={activeFragment.files as FileCollection} projectId={projectId} />
-              ) : (
-                <VibeCoderChallenge />
-              )}
+              ) : null}
             </TabsContent>
           </Tabs>
         </ResizablePanel>
