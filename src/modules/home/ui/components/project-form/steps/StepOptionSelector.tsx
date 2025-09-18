@@ -1,6 +1,6 @@
 "use client";
 
-import { Palette, BarChart3, Layers, Clock } from "lucide-react";
+import { Palette, BarChart3, Layers, Clock, Mail, CreditCard } from "lucide-react";
 
 type StepChoices = {
   palette: boolean;
@@ -17,6 +17,15 @@ const options = [
   { key: "palette", label: "Paleta de cores", description: "Defina a identidade de cores do projeto.", icon: Palette },
   { key: "monitoring", label: "Monitoramento", description: "Configure métricas e observabilidade.", icon: BarChart3 },
   { key: "components", label: "Componentes", description: "Escolha e configure componentes base.", icon: Layers },
+] as const;
+
+const comingSoonOptions = [
+  { label: "Coleta de emails", icon: Mail },
+  { label: "Pagamentos", icon: CreditCard },
+  { label: "Em breve", icon: Clock },
+  { label: "Em breve", icon: Clock },
+  { label: "Em breve", icon: Clock },
+  { label: "Em breve", icon: Clock },
 ] as const;
 
 export function StepOptionSelector({ value, onChange }: Props) {
@@ -56,21 +65,24 @@ export function StepOptionSelector({ value, onChange }: Props) {
             </button>
           );
         })}
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div
-            key={`soon-${i}`}
-            className="relative rounded-lg border p-5 w-full text-center bg-muted/40 opacity-70 cursor-not-allowed"
-            aria-disabled
-          >
-            <span className="absolute top-2 right-2 text-[10px] px-1.5 py-0.5 rounded bg-muted-foreground/20 text-foreground/60">
-              em breve
-            </span>
-            <span className="mx-auto size-12 grid place-items-center rounded-md border bg-muted text-foreground/60 border-transparent">
-              <Clock className="size-6" />
-            </span>
-            <div className="mt-3 text-sm font-medium text-foreground/70">Em breve</div>
-          </div>
-        ))}
+        {comingSoonOptions.map((opt, i) => {
+          const Icon = opt.icon;
+          return (
+            <div
+              key={`soon-${i}`}
+              className="relative rounded-lg border p-5 w-full text-center bg-muted/40 opacity-70 cursor-not-allowed"
+              aria-disabled
+            >
+              <span className="absolute top-2 right-2 text-[10px] px-1.5 py-0.5 rounded bg-muted-foreground/20 text-foreground/60">
+                em breve
+              </span>
+              <span className="mx-auto size-12 grid place-items-center rounded-md border bg-muted text-foreground/60 border-transparent">
+                <Icon className="size-6" />
+              </span>
+              <div className="mt-3 text-sm font-medium text-foreground/70">{opt.label}</div>
+            </div>
+          );
+        })}
       </div>
       <p className="text-xs text-foreground/60 mt-3">Você pode avançar apenas com o que for relevante agora.</p>
     </div>
