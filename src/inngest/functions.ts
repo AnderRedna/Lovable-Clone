@@ -66,6 +66,136 @@ type AgentState = {
   allowedPaths?: string[];
 };
 
+// ===== Shared helpers to reduce duplication across flows =====
+async function getOrCreateSandboxId(step: any) {
+  return await step.run("get-sandbox-id", async () => {
+    console.log("Running get-sandbox-id");
+    const template =
+      process.env.E2B_TEMPLATE_ID ||
+      process.env.E2B_TEMPLATE_NAME ||
+      "lovable-clone-nextjs-sg-0206";
+    console.log("Creating E2B sandbox using template:", template);
+    try {
+      const sandbox = await Sandbox.create(template);
+      await sandbox.setTimeout(SANDBOX_TIMEOUT_IN_MS);
+      console.log("Completed get-sandbox-id", sandbox.sandboxId);
+      return sandbox.sandboxId;
+    } catch (err: any) {
+      console.error("Failed to create E2B sandbox. Check E2B_API_KEY access and template ownership.", { message: err?.message });
+      throw err;
+    }
+  });
+}
+
+function createTaskStepsAgent() {
+  return createAgent({
+    name: "task-steps-generator",
+    description: "A task steps generator",
+    system: TASK_STEPS_PROMPT,
+    model: azureOpenAICompat({
+      endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
+      apiKey: process.env.AZURE_OPENAI_API_KEY!,
+      deployment: process.env.AZURE_OPENAI_4_1_DEPLOYMENT!,
+      apiVersion: process.env.AZURE_OPENAI_4_1_API_VERSION!,
+      defaultParameters: { temperature: 0.1 },
+    }),
+  });
+}
+
+function createFragmentTitleAgent() {
+  return createAgent({
+    name: "fragment-title-generator",
+    description: "A fragment title generator",
+    system: FRAGMENT_TITLE_PROMPT,
+    model: azureOpenAICompat({
+      endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
+      apiKey: process.env.AZURE_OPENAI_5_API_KEY || process.env.AZURE_OPENAI_API_KEY!,
+      deployment: process.env.AZURE_OPENAI_5_DEPLOYMENT || process.env.AZURE_OPENAI_DEPLOYMENT!,
+      apiVersion: process.env.AZURE_OPENAI_5_API_VERSION || process.env.AZURE_OPENAI_API_VERSION!,
+      defaultParameters: { temperature: 0.1 },
+    }),
+  });
+}
+
+function createResponseAgent() {
+  return createAgent({
+    name: "response-generator",
+    description: "Generates the user-facing summary message",
+    system: RESPONSE_PROMPT,
+    model: azureOpenAICompat({
+      endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
+      apiKey: process.env.AZURE_OPENAI_API_KEY!,
+      deployment: process.env.AZURE_OPENAI_4_1_DEPLOYMENT!,
+      apiVersion: process.env.AZURE_OPENAI_4_1_API_VERSION!,
+      defaultParameters: { temperature: 0.1 },
+    }),
+  });
+}
+
+function createFragmentTitleAgentDefault() {
+  return createAgent({
+    name: "fragment-title-generator",
+    description: "A fragment title generator",
+    system: FRAGMENT_TITLE_PROMPT,
+    model: azureOpenAICompat({
+      endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
+      apiKey: process.env.AZURE_OPENAI_API_KEY!,
+      deployment: process.env.AZURE_OPENAI_4_1_DEPLOYMENT!,
+      apiVersion: process.env.AZURE_OPENAI_4_1_API_VERSION!,
+      defaultParameters: { temperature: 0.1 },
+    }),
+  });
+}
+
+function createResponseAgentDefault() {
+  return createAgent({
+    name: "response-generator",
+    description: "A response generator",
+    system: RESPONSE_PROMPT,
+    model: azureOpenAICompat({
+      endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
+      apiKey: process.env.AZURE_OPENAI_API_KEY!,
+      deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
+      apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
+      defaultParameters: { temperature: 0.1 },
+    }),
+  });
+}
+
+async function ensureMetadataStep(step: any, result: any, sandboxId: string, title: string, description: string) {
+  await step.run("ensure-metadata", async () => {
+    try {
+      if (!result?.state?.data) return;
+      const files = (result.state.data.files || {}) as Record<string, string>;
+      const sandbox = await getSandbox(sandboxId);
+
+      const candidates = [
+        "src/app/layout.tsx","src/app/layout.jsx","src/app/layout.ts","src/app/layout.js",
+        "app/layout.tsx","app/layout.jsx","app/layout.ts","app/layout.js",
+      ];
+      let layoutPath = Object.keys(files).find((p) => /^(src\/)?app\/layout\.(tsx|jsx|ts|js)$/i.test(p));
+      let raw = layoutPath ? String(files[layoutPath] || "") : "";
+      if (!layoutPath || !raw) {
+        for (const p of candidates) {
+          try {
+            const r = await sandbox.files.read(p);
+            if (r && typeof r === "string") { layoutPath = p; raw = r; break; }
+          } catch {}
+        }
+      }
+      if (!layoutPath) layoutPath = "app/layout.tsx";
+
+      const next = upsertMetadataInLayout(raw, title, description);
+      if (next !== raw) {
+        await sandbox.files.write(layoutPath, next);
+        (result.state.data.files as any)[layoutPath] = next;
+      }
+    } catch (e) {
+      console.warn("ensure-metadata failed", e);
+    }
+  });
+}
+
 // Normaliza caminhos sugeridos pelo modelo/usuário para dentro do sandbox
 function normalizeSandboxPath(p: string, hasSrc: boolean): string {
   let s = (p || "").trim().replace(/\\/g, "/");
@@ -444,28 +574,7 @@ export const codeAgentFunction = inngest.createFunction(
   { event: "code-agent/run" },
   async ({ event, step }) => {
     console.log("Starting code-agent function", JSON.stringify(event.data));
-    const sandboxId = await step.run("get-sandbox-id", async () => {
-      console.log("Running get-sandbox-id");
-      const template =
-        process.env.E2B_TEMPLATE_ID ||
-        process.env.E2B_TEMPLATE_NAME ||
-        "lovable-clone-nextjs-sg-0206"; // fallback to demo template
-      console.log("Creating E2B sandbox using template:", template);
-      try {
-        const sandbox = await Sandbox.create(template);
-        await sandbox.setTimeout(SANDBOX_TIMEOUT_IN_MS);
-        console.log("Completed get-sandbox-id", sandbox.sandboxId);
-        return sandbox.sandboxId;
-      } catch (err: any) {
-        console.error(
-          "Failed to create E2B sandbox. Check E2B_API_KEY access and template ownership.",
-          {
-            message: err?.message,
-          }
-        );
-        throw err;
-      }
-    });
+    const sandboxId = await getOrCreateSandboxId(step);
 
     const previousMessages = await step.run(
       "get-previous-messages",
@@ -736,20 +845,7 @@ export const codeAgentFunction = inngest.createFunction(
       .filter(Boolean)
       .join("");
 
-    const taskStepsGenerator = createAgent({
-      name: "task-steps-generator",
-      description: "A task steps generator",
-      system: TASK_STEPS_PROMPT,
-      model: azureOpenAICompat({
-        endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
-        apiKey: process.env.AZURE_OPENAI_5_API_KEY || process.env.AZURE_OPENAI_API_KEY!,
-        deployment: process.env.AZURE_OPENAI_5_DEPLOYMENT || process.env.AZURE_OPENAI_DEPLOYMENT!,
-        apiVersion: process.env.AZURE_OPENAI_5_API_VERSION || process.env.AZURE_OPENAI_API_VERSION!,
-        defaultParameters: {
-          temperature: 0.1,
-        },
-      }),
-    });
+    const taskStepsGenerator = createTaskStepsAgent();
 
     const { output: taskStepsOutput } = await taskStepsGenerator.run(
       enrichedInstruction
@@ -774,35 +870,9 @@ export const codeAgentFunction = inngest.createFunction(
     const result = await network.run(enrichedInstruction, { state });
     console.log("Completed network.run", result.state.data.summary ? "success" : "error");
 
-  const fragmentTitleGenerator = createAgent({
-      name: "fragment-title-generator",
-      description: "A fragment title generator",
-      system: FRAGMENT_TITLE_PROMPT,
-      model: azureOpenAICompat({
-        endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
-        apiKey: process.env.AZURE_OPENAI_5_API_KEY || process.env.AZURE_OPENAI_API_KEY!,
-        deployment: process.env.AZURE_OPENAI_5_DEPLOYMENT || process.env.AZURE_OPENAI_DEPLOYMENT!,
-        apiVersion: process.env.AZURE_OPENAI_5_API_VERSION || process.env.AZURE_OPENAI_API_VERSION!,
-        defaultParameters: {
-          temperature: 0.1,
-        },
-      }),
-    });
+  const fragmentTitleGenerator = createFragmentTitleAgent();
 
-  const responseGenerator = createAgent({
-      name: "response-generator",
-      description: "Generates the user-facing summary message",
-      system: RESPONSE_PROMPT,
-      model: azureOpenAICompat({
-        endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
-        apiKey: process.env.AZURE_OPENAI_5_API_KEY || process.env.AZURE_OPENAI_API_KEY!,
-        deployment: process.env.AZURE_OPENAI_5_DEPLOYMENT || process.env.AZURE_OPENAI_DEPLOYMENT!,
-        apiVersion: process.env.AZURE_OPENAI_5_API_VERSION || process.env.AZURE_OPENAI_API_VERSION!,
-        defaultParameters: {
-          temperature: 0.1,
-        },
-      }),
-    });
+  const responseGenerator = createResponseAgent();
 
   const { output: fragmentTitleOutput } = await fragmentTitleGenerator.run(
       result.state.data.summary
@@ -817,43 +887,7 @@ export const codeAgentFunction = inngest.createFunction(
     console.log("Completed responseGenerator.run");
 
     // Ensure project metadata (title/description) in app/layout.*
-    await step.run("ensure-metadata", async () => {
-      try {
-        if (!result?.state?.data) return;
-        const files = (result.state.data.files || {}) as Record<string, string>;
-        const sandbox = await getSandbox(sandboxId);
-        const title = "LandinsPage";
-        const description = "Landing Page criada no Landinfy.com";
-
-        // Find best layout path: check memory and sandbox for app/ and src/app variants
-        const candidates = [
-          "src/app/layout.tsx","src/app/layout.jsx","src/app/layout.ts","src/app/layout.js",
-          "app/layout.tsx","app/layout.jsx","app/layout.ts","app/layout.js",
-        ];
-        let layoutPath = Object.keys(files).find((p) => /^(src\/)?app\/layout\.(tsx|jsx|ts|js)$/i.test(p));
-        let raw = layoutPath ? String(files[layoutPath] || "") : "";
-        if (!layoutPath || !raw) {
-          for (const p of candidates) {
-            try {
-              const r = await sandbox.files.read(p);
-              if (r && typeof r === "string") { layoutPath = p; raw = r; break; }
-            } catch {}
-          }
-        }
-        if (!layoutPath) {
-          // Default to app/layout.tsx if none exist
-          layoutPath = "app/layout.tsx";
-        }
-
-        const next = upsertMetadataInLayout(raw, title, description);
-        if (next !== raw) {
-          await sandbox.files.write(layoutPath, next);
-          (result.state.data.files as any)[layoutPath] = next;
-        }
-      } catch (e) {
-        console.warn("ensure-metadata failed", e);
-      }
-    });
+    await ensureMetadataStep(step, result, sandboxId, "LandinsPage", "Landing Page criada no Landinfy.com");
 
     const isError =
       !result.state.data.summary ||
@@ -1529,15 +1563,7 @@ export const codeAgentEditFunction = inngest.createFunction(
   { event: "code-agent/edit" },
   async ({ event, step }) => {
     console.log("Starting code-agent-edit", JSON.stringify(event.data));
-    const sandboxId = await step.run("get-sandbox-id", async () => {
-      const template =
-        process.env.E2B_TEMPLATE_ID ||
-        process.env.E2B_TEMPLATE_NAME ||
-        "lovable-clone-nextjs-sg-0206";
-      const sandbox = await Sandbox.create(template);
-      await sandbox.setTimeout(SANDBOX_TIMEOUT_IN_MS);
-      return sandbox.sandboxId;
-    });
+    const sandboxId = await getOrCreateSandboxId(step);
 
     // Load last fragment files for this project
     const existing = await step.run("load-existing-files", async () => {
@@ -1693,20 +1719,7 @@ export const codeAgentEditFunction = inngest.createFunction(
       .filter(Boolean)
       .join("\n\n");
 
-    const taskStepsGenerator = createAgent({
-      name: "task-steps-generator",
-      description: "A task steps generator",
-      system: TASK_STEPS_PROMPT,
-      model: azureOpenAICompat({
-        endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
-        apiKey: process.env.AZURE_OPENAI_5_API_KEY || process.env.AZURE_OPENAI_API_KEY!,
-        deployment: process.env.AZURE_OPENAI_5_DEPLOYMENT || process.env.AZURE_OPENAI_DEPLOYMENT!,
-        apiVersion: process.env.AZURE_OPENAI_5_API_VERSION || process.env.AZURE_OPENAI_API_VERSION!,
-        defaultParameters: {
-          temperature: 0.1,
-        },
-      }),
-    });
+    const taskStepsGenerator = createTaskStepsAgent();
 
     const { output: taskStepsOutput } = await taskStepsGenerator.run(
       enrichedInstructionForSteps
@@ -1921,31 +1934,8 @@ export const codeAgentEditFunction = inngest.createFunction(
 
     const result = await editorNetwork.run(enrichedInstruction, { state });
 
-    const fragmentTitleGenerator = createAgent({
-      name: "fragment-title-generator",
-      description: "A fragment title generator",
-      system: FRAGMENT_TITLE_PROMPT,
-      model: azureOpenAICompat({
-        endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
-        apiKey: process.env.AZURE_OPENAI_API_KEY!,
-        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
-        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
-        defaultParameters: { temperature: 0.1 },
-      }),
-    });
-
-    const responseGenerator = createAgent({
-      name: "response-generator",
-      description: "A response generator",
-      system: RESPONSE_PROMPT,
-      model: azureOpenAICompat({
-        endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
-        apiKey: process.env.AZURE_OPENAI_API_KEY!,
-        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
-        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
-        defaultParameters: { temperature: 0.1 },
-      }),
-    });
+    const fragmentTitleGenerator = createFragmentTitleAgentDefault();
+    const responseGenerator = createResponseAgentDefault();
 
     const { output: fragmentTitleOutput } = await fragmentTitleGenerator.run(
       result.state.data.summary
@@ -1955,39 +1945,7 @@ export const codeAgentEditFunction = inngest.createFunction(
     );
 
     // Ensure project metadata (title/description) in app/layout.* for edit flow
-    await step.run("ensure-metadata", async () => {
-      try {
-        if (!result?.state?.data) return;
-        const files = (result.state.data.files || {}) as Record<string, string>;
-        const sandbox = await getSandbox(sandboxId);
-        const title = "LandingPage";
-        const description = "Landing Page criada no Landinfy.com";
-
-        const variants = [
-          "src/app/layout.tsx","src/app/layout.jsx","src/app/layout.ts","src/app/layout.js",
-          "app/layout.tsx","app/layout.jsx","app/layout.ts","app/layout.js",
-        ];
-        let layoutPath = Object.keys(files).find((p) => /^(src\/)?app\/layout\.(tsx|jsx|ts|js)$/i.test(p));
-        let raw = layoutPath ? String(files[layoutPath] || "") : "";
-        if (!layoutPath || !raw) {
-          for (const p of variants) {
-            try {
-              const r = await sandbox.files.read(p);
-              if (r && typeof r === "string") { layoutPath = p; raw = r; break; }
-            } catch {}
-          }
-        }
-        if (!layoutPath) layoutPath = "app/layout.tsx";
-
-        const next = upsertMetadataInLayout(raw, title, description);
-        if (next !== raw) {
-          await sandbox.files.write(layoutPath, next);
-          (result.state.data.files as any)[layoutPath] = next;
-        }
-      } catch (e) {
-        console.warn("ensure-metadata (edit) failed", e);
-      }
-    });
+    await ensureMetadataStep(step, result, sandboxId, "LandingPage", "Landing Page criada no Landinfy.com");
 
     const isError =
       !result.state.data.summary ||

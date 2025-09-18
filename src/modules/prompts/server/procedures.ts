@@ -26,13 +26,12 @@ const azureOpenAICompat = (opts: {
 };
 
 async function callAzureChat(messages: Array<{ role: "system" | "user" | "assistant"; content: string }>): Promise<string> {
-  // Use GPT-4.1 for the "improve" button
   const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
-  const apiKey = process.env.AZURE_OPENAI_4_1_API_KEY || process.env.AZURE_OPENAI_API_KEY;
-  const deployment = process.env.AZURE_OPENAI_4_1_DEPLOYMENT || process.env.AZURE_OPENAI_DEPLOYMENT;
-  const apiVersion = process.env.AZURE_OPENAI_4_1_API_VERSION || process.env.AZURE_OPENAI_API_VERSION || "2025-01-01-preview";
+  const apiKey = process.env.AZURE_OPENAI_API_KEY
+  const deployment = process.env.AZURE_OPENAI_4_1_DEPLOYMENT;
+  const apiVersion = process.env.AZURE_OPENAI_4_1_API_VERSION;
 
-  if (!endpoint || !apiKey || !deployment) {
+  if (!endpoint || !apiKey || !deployment || !apiVersion) {
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Azure OpenAI env vars missing" });
   }
 
