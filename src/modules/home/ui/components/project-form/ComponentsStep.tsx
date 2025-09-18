@@ -5,6 +5,7 @@ import TextareaAutosize from "react-textarea-autosize";
 import { Label } from "../../../../../components/ui/label";
 import { cn } from "../../../../../lib/utils";
 import type { ComponentKey, ComponentConfig } from "./types";
+import { COMPONENT_TRANSLATIONS } from "./types";
 
 type Props = {
   isPending: boolean;
@@ -14,6 +15,34 @@ type Props = {
 };
 
 export function ComponentsStep({ isPending, componentKeys, componentsCfg, setComponentsCfg }: Props) {
+  const handleComponentToggle = (key: ComponentKey) => {
+    setComponentsCfg((prev) => {
+      const newCfg = { ...prev };
+      const wasEnabled = newCfg[key].enabled;
+      const newEnabled = !wasEnabled;
+
+      if (newEnabled) {
+        // Enabling: assign next available order
+        const existingOrders = componentKeys
+          .filter(k => newCfg[k].enabled)
+          .map(k => newCfg[k].order || 0)
+          .filter(order => order > 0);
+        const nextOrder = existingOrders.length > 0 ? Math.max(...existingOrders) + 1 : 1;
+        newCfg[key] = { ...newCfg[key], enabled: true, order: nextOrder };
+      } else {
+        // Disabling: clear order and reorder remaining components
+        newCfg[key] = { ...newCfg[key], enabled: false, order: undefined };
+
+        // Reorder remaining enabled components
+        const enabledKeys = componentKeys.filter(k => newCfg[k].enabled);
+        enabledKeys.forEach((k, index) => {
+          newCfg[k] = { ...newCfg[k], order: index + 1 };
+        });
+      }
+
+      return newCfg;
+    });
+  };
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Componentes</h2>
@@ -26,19 +55,19 @@ export function ComponentsStep({ isPending, componentKeys, componentsCfg, setCom
               <button
                 key={key}
                 type="button"
-                onClick={() =>
-                  setComponentsCfg((prev) => ({
-                    ...prev,
-                    [key]: { ...prev[key], enabled: !prev[key].enabled },
-                  }))
-                }
+                onClick={() => handleComponentToggle(key)}
                 className={cn(
-                  "border rounded-lg p-3 text-left text-sm transition-colors",
+                  "border rounded-lg p-3 text-left text-sm transition-colors relative",
                   "hover:border-primary",
                   selected && "border-primary bg-primary/5"
                 )}
               >
-                <div className="font-medium text-sm">{key}</div>
+                {selected && componentsCfg[key].order && (
+                  <div className="absolute -top-1 -left-1 w-5 h-5 bg-primary text-primary-foreground text-xs font-bold rounded-full flex items-center justify-center">
+                    {componentsCfg[key].order}
+                  </div>
+                )}
+                <div className="font-medium text-sm">{COMPONENT_TRANSLATIONS[key]}</div>
               </button>
             );
           })}

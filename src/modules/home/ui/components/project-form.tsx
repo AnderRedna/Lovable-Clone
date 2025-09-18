@@ -132,7 +132,7 @@ const ProjectForm = () => {
   const [componentsCfg, setComponentsCfg] = useState<Record<ComponentKey, ComponentConfig>>(
     () =>
       componentKeys.reduce((acc, key) => {
-        acc[key] = { enabled: false, prompt: "", border: { enabled: false, prompt: "" } };
+        acc[key] = { enabled: false, prompt: "", border: { enabled: false, prompt: "" }, order: undefined };
         return acc;
       }, {} as Record<ComponentKey, ComponentConfig>)
   );
@@ -144,7 +144,7 @@ const ProjectForm = () => {
     setAnalytics({ provider: "none", code: "" });
     setComponentsCfg(
       componentKeys.reduce((acc, key) => {
-        acc[key] = { enabled: false, prompt: "", border: { enabled: false, prompt: "" } };
+        acc[key] = { enabled: false, prompt: "", border: { enabled: false, prompt: "" }, order: undefined };
         return acc;
       }, {} as Record<ComponentKey, ComponentConfig>)
     );
@@ -173,7 +173,7 @@ const ProjectForm = () => {
     // Start wizard on first submit click
     if (!wizardActive) {
       setWizardActive(true);
-      setStep(1); // Start from step 1
+      setStep(2); // Start from step 2 (Monitoramento)
       return;
     }
 

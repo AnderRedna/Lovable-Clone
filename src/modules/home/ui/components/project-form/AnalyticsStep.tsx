@@ -3,6 +3,7 @@
 import TextareaAutosize from "react-textarea-autosize";
 import { Label } from "../../../../../components/ui/label";
 import { cn } from "../../../../../lib/utils";
+import { BarChart3, MousePointerClick, Sparkles, CircleSlash } from "lucide-react";
 import type { AnalyticsProvider, AnalyticsState } from "./types";
 
 type Props = {
@@ -17,12 +18,13 @@ export function AnalyticsStep({ isPending, analytics, setAnalytics }: Props) {
       <h2 className="text-lg font-semibold">Monitoramento</h2>
       <div className="grid grid-cols-2 gap-3">
         {([
-          { key: "google-analytics", label: "Google Analytics" },
-          { key: "clarity", label: "Clarity" },
-          { key: "other", label: "Outros" },
-          { key: "none", label: "Nenhum" },
-        ] as { key: AnalyticsProvider; label: string }[]).map((opt) => {
+          { key: "google-analytics", label: "Google Analytics", icon: BarChart3 },
+          { key: "clarity", label: "Clarity", icon: MousePointerClick },
+          { key: "other", label: "Outros", icon: Sparkles },
+          { key: "none", label: "Nenhum", icon: CircleSlash },
+        ] as { key: AnalyticsProvider; label: string; icon: React.ComponentType<React.SVGProps<SVGSVGElement>> }[]).map((opt) => {
           const selected = analytics.provider === opt.key;
+          const Icon = opt.icon;
           return (
             <button
               key={opt.key}
@@ -36,7 +38,10 @@ export function AnalyticsStep({ isPending, analytics, setAnalytics }: Props) {
                 selected && "border-primary bg-primary/5"
               )}
             >
-              <div className="font-medium text-sm">{opt.label}</div>
+              <div className="flex items-center gap-2">
+                <Icon className={cn("size-4", selected ? "text-primary" : "text-muted-foreground")} />
+                <div className="font-medium text-sm">{opt.label}</div>
+              </div>
             </button>
           );
         })}

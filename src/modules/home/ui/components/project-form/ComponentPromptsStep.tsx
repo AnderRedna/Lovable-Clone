@@ -5,6 +5,7 @@ import TextareaAutosize from "react-textarea-autosize";
 import { Label } from "../../../../../components/ui/label";
 import { cn } from "../../../../../lib/utils";
 import type { ComponentKey, ComponentConfig } from "./types";
+import { COMPONENT_TRANSLATIONS } from "./types";
 
 type Props = {
   isPending: boolean;
@@ -29,7 +30,7 @@ export function ComponentPromptsStep({ isPending, orderedKeys, index, components
       <h2 className="text-lg font-semibold">Componente {index + 1} de {orderedKeys.length}</h2>
       <div className="border rounded-lg p-4">
         <div className="flex items-center justify-between mb-2">
-          <div className="font-medium">{k}</div>
+          <div className="font-medium">{COMPONENT_TRANSLATIONS[k]}</div>
           <Link
             href="https://21st.dev/components"
             target="_blank"
@@ -45,7 +46,7 @@ export function ComponentPromptsStep({ isPending, orderedKeys, index, components
             minRows={4}
             maxRows={12}
             className="w-full resize-y rounded-md border bg-transparent p-2 text-sm"
-            placeholder={`Descreva o conteúdo/estilo para ${k}`}
+            placeholder={`Descreva o conteúdo/estilo para ${COMPONENT_TRANSLATIONS[k]}`}
             value={cfg?.prompt ?? ""}
             onChange={(e) =>
               setComponentsCfg((prev) => ({
@@ -86,7 +87,7 @@ export function ComponentPromptsStep({ isPending, orderedKeys, index, components
                   "w-full resize-y rounded-md border bg-transparent p-2 text-sm",
                   !cfg?.border?.prompt && "border-destructive/50"
                 )}
-                placeholder={`Descreva a borda a aplicar em ${k}`}
+                placeholder={`Descreva a borda a aplicar em ${COMPONENT_TRANSLATIONS[k]}`}
                 value={cfg?.border?.prompt ?? ""}
                 onChange={(e) =>
                   setComponentsCfg((prev) => ({

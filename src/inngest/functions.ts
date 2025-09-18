@@ -463,9 +463,9 @@ export const codeAgentFunction = inngest.createFunction(
       system: PROMPT,
       model: azureOpenAICompat({
         endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
-        apiKey: process.env.AZURE_OPENAI_API_KEY!,
-        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
-        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
+        apiKey: process.env.AZURE_OPENAI_5_API_KEY || process.env.AZURE_OPENAI_API_KEY!,
+        deployment: process.env.AZURE_OPENAI_5_DEPLOYMENT || process.env.AZURE_OPENAI_DEPLOYMENT!,
+        apiVersion: process.env.AZURE_OPENAI_5_API_VERSION || process.env.AZURE_OPENAI_API_VERSION!,
         defaultParameters: { temperature: 0.1 },
       }),
       tools: [
@@ -690,9 +690,9 @@ export const codeAgentFunction = inngest.createFunction(
       system: TASK_STEPS_PROMPT,
       model: azureOpenAICompat({
         endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
-        apiKey: process.env.AZURE_OPENAI_API_KEY!,
-        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
-        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
+        apiKey: process.env.AZURE_OPENAI_5_API_KEY || process.env.AZURE_OPENAI_API_KEY!,
+        deployment: process.env.AZURE_OPENAI_5_DEPLOYMENT || process.env.AZURE_OPENAI_DEPLOYMENT!,
+        apiVersion: process.env.AZURE_OPENAI_5_API_VERSION || process.env.AZURE_OPENAI_API_VERSION!,
         defaultParameters: {
           temperature: 0.1,
         },
@@ -728,9 +728,9 @@ export const codeAgentFunction = inngest.createFunction(
       system: FRAGMENT_TITLE_PROMPT,
       model: azureOpenAICompat({
         endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
-        apiKey: process.env.AZURE_OPENAI_API_KEY!,
-        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
-        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
+        apiKey: process.env.AZURE_OPENAI_5_API_KEY || process.env.AZURE_OPENAI_API_KEY!,
+        deployment: process.env.AZURE_OPENAI_5_DEPLOYMENT || process.env.AZURE_OPENAI_DEPLOYMENT!,
+        apiVersion: process.env.AZURE_OPENAI_5_API_VERSION || process.env.AZURE_OPENAI_API_VERSION!,
         defaultParameters: {
           temperature: 0.1,
         },
@@ -743,9 +743,9 @@ export const codeAgentFunction = inngest.createFunction(
       system: RESPONSE_PROMPT,
       model: azureOpenAICompat({
         endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
-        apiKey: process.env.AZURE_OPENAI_API_KEY!,
-        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
-        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
+        apiKey: process.env.AZURE_OPENAI_5_API_KEY || process.env.AZURE_OPENAI_API_KEY!,
+        deployment: process.env.AZURE_OPENAI_5_DEPLOYMENT || process.env.AZURE_OPENAI_DEPLOYMENT!,
+        apiVersion: process.env.AZURE_OPENAI_5_API_VERSION || process.env.AZURE_OPENAI_API_VERSION!,
         defaultParameters: {
           temperature: 0.1,
         },
@@ -1451,9 +1451,9 @@ export const codeAgentEditFunction = inngest.createFunction(
         "You are an impact analyzer. Given a change request and a file map, return a compact JSON array of file paths to modify. Rules:\n- Select the smallest set of files that must change to implement the request.\n- Do not include files that do not need edits.\n- Output ONLY a JSON array of strings (no markdown, no commentary).",
       model: azureOpenAICompat({
         endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
-        apiKey: process.env.AZURE_OPENAI_API_KEY!,
-        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
-        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
+        apiKey: process.env.AZURE_OPENAI_5_API_KEY || process.env.AZURE_OPENAI_API_KEY!,
+        deployment: process.env.AZURE_OPENAI_5_DEPLOYMENT || process.env.AZURE_OPENAI_DEPLOYMENT!,
+        apiVersion: process.env.AZURE_OPENAI_5_API_VERSION || process.env.AZURE_OPENAI_API_VERSION!,
         defaultParameters: { temperature: 0.1 },
       }),
     });
@@ -1512,9 +1512,9 @@ export const codeAgentEditFunction = inngest.createFunction(
       system: TASK_STEPS_PROMPT,
       model: azureOpenAICompat({
         endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
-        apiKey: process.env.AZURE_OPENAI_API_KEY!,
-        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
-        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
+        apiKey: process.env.AZURE_OPENAI_5_API_KEY || process.env.AZURE_OPENAI_API_KEY!,
+        deployment: process.env.AZURE_OPENAI_5_DEPLOYMENT || process.env.AZURE_OPENAI_DEPLOYMENT!,
+        apiVersion: process.env.AZURE_OPENAI_5_API_VERSION || process.env.AZURE_OPENAI_API_VERSION!,
         defaultParameters: {
           temperature: 0.1,
         },
@@ -1548,9 +1548,9 @@ export const codeAgentEditFunction = inngest.createFunction(
   system: `${EDIT_PROMPT}\n\nAllowed files:\n${(state.data.allowedPaths || []).map((p) => `- ${p}`).join("\n")}`,
       model: azureOpenAICompat({
         endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
-        apiKey: process.env.AZURE_OPENAI_API_KEY!,
-        deployment: process.env.AZURE_OPENAI_DEPLOYMENT!,
-        apiVersion: process.env.AZURE_OPENAI_API_VERSION!,
+        apiKey: process.env.AZURE_OPENAI_5_API_KEY || process.env.AZURE_OPENAI_API_KEY!,
+        deployment: process.env.AZURE_OPENAI_5_DEPLOYMENT || process.env.AZURE_OPENAI_DEPLOYMENT!,
+        apiVersion: process.env.AZURE_OPENAI_5_API_VERSION || process.env.AZURE_OPENAI_API_VERSION!,
         defaultParameters: { temperature: 0.1 },
       }),
       tools: [
