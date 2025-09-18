@@ -1,4 +1,8 @@
-export type AnalyticsProvider = "none" | "google-analytics" | "clarity" | "other";
+import { z } from "zod";
+
+export const analyticsProviderSchema = z.enum(["none", "google-analytics", "clarity", "hotjar", "other"]);
+
+export type AnalyticsProvider = z.infer<typeof analyticsProviderSchema>;
 
 export type ComponentKey =
   | "Background"

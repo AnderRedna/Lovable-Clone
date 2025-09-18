@@ -3,7 +3,7 @@
 import TextareaAutosize from "react-textarea-autosize";
 import { Label } from "../../../../../components/ui/label";
 import { cn } from "../../../../../lib/utils";
-import { BarChart3, MousePointerClick, Sparkles, CircleSlash } from "lucide-react";
+import { BarChart3, MousePointerClick, Sparkles, CircleSlash, Eye } from "lucide-react";
 import type { AnalyticsProvider, AnalyticsState } from "./types";
 
 type Props = {
@@ -20,6 +20,7 @@ export function AnalyticsStep({ isPending, analytics, setAnalytics }: Props) {
         {([
           { key: "google-analytics", label: "Google Analytics", icon: BarChart3 },
           { key: "clarity", label: "Clarity", icon: MousePointerClick },
+          { key: "hotjar", label: "Hotjar", icon: Eye },
           { key: "other", label: "Outros", icon: Sparkles },
           { key: "none", label: "Nenhum", icon: CircleSlash },
         ] as { key: AnalyticsProvider; label: string; icon: React.ComponentType<React.SVGProps<SVGSVGElement>> }[]).map((opt) => {
@@ -59,6 +60,8 @@ export function AnalyticsStep({ isPending, analytics, setAnalytics }: Props) {
                 ? "<!-- GA4 snippet -->\n<script>/* ... */</script>"
                 : analytics.provider === "clarity"
                 ? "<!-- Clarity snippet -->\n<script>/* ... */</script>"
+                : analytics.provider === "hotjar"
+                ? "<!-- Hotjar snippet -->\n<script>/* ... */</script>"
                 : "Cole aqui o código do seu provedor"
             }
             value={analytics.code}

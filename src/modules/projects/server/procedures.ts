@@ -2,6 +2,8 @@ import { TRPCError } from "@trpc/server";
 import { generateSlug } from "random-word-slugs";
 import { z } from "zod";
 
+import { analyticsProviderSchema } from "@/modules/home/ui/components/project-form/types";
+
 import { inngest } from "@/inngest/client";
 import prisma from "@/lib/prisma";
 import { consumeCredits } from "@/lib/usage";
@@ -52,7 +54,7 @@ export const projectsRouter = createTRPCRouter({
         customization: z
           .object({
             analytics: z.object({
-              provider: z.enum(["none", "google-analytics", "clarity", "other"]),
+              provider: analyticsProviderSchema,
               code: z.string().optional(),
             }),
             components: z.record(
