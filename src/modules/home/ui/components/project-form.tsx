@@ -17,6 +17,9 @@ import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 import { useRouter } from "next/navigation";
 import { WizardModal, AnalyticsStep, ComponentsStep, ComponentPromptsStep } from "./project-form/index";
+import { PaletteSelector } from "./project-form/PaletteSelector";
+import type { ColorPalette } from "./project-form/PaletteSelector";
+import { getOrderedComponentKeys } from "./project-form/types";
 
 const formSchema = z.object({
   value: z.string().min(1, { message: "Value is required" }),
@@ -58,14 +61,23 @@ const ProjectForm = () => {
   );
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
+    const customization = (isCustomizing || selectedPalette)
+      ? {
+          analytics: isCustomizing ? analytics : ({ provider: "none", code: "" } as const),
+          components: isCustomizing ? componentsCfg : ({} as Record<string, any>),
+          theme: selectedPalette
+            ? {
+                paletteId: selectedPalette.id,
+                paletteName: selectedPalette.name,
+                colors: selectedPalette.colors,
+              }
+            : undefined,
+        }
+      : undefined;
+
     await createProject.mutateAsync({
       value: values.value,
-      customization: isCustomizing
-        ? {
-            analytics,
-            components: componentsCfg,
-          }
-        : undefined,
+      customization,
     });
   };
 
@@ -104,6 +116,7 @@ const ProjectForm = () => {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [wizardActive, setWizardActive] = useState(false);
   const [componentEditIndex, setComponentEditIndex] = useState<number | null>(null);
+  const [selectedPalette, setSelectedPalette] = useState<ColorPalette | null>(null);
 
   type AnalyticsProvider = import("./project-form/types").AnalyticsProvider;
   type ComponentKey = import("./project-form/types").ComponentKey;
@@ -148,6 +161,7 @@ const ProjectForm = () => {
         return acc;
       }, {} as Record<ComponentKey, ComponentConfig>)
     );
+    setSelectedPalette(null);
   };
 
   const isPending = createProject.isPending;
@@ -189,7 +203,7 @@ const ProjectForm = () => {
       return;
     }
     // step 3 -> component prompts (3.1) flow
-    const enabledKeys = componentKeys.filter((k) => componentsCfg[k].enabled);
+    const enabledKeys = getOrderedComponentKeys(componentKeys, componentsCfg);
     const lastIndex = enabledKeys.length - 1;
 
     // If not yet in substep and there are components, start at first
@@ -363,16 +377,16 @@ const ProjectForm = () => {
               disabled={
                 (step === 1 && !canAdvanceFromStep1) ||
                 (step === 2 && !canAdvanceFromStep2) ||
-                (step === 3 && componentEditIndex !== null && componentKeys.filter((k) => componentsCfg[k].enabled).length > 0
+                (step === 3 && componentEditIndex !== null && getOrderedComponentKeys(componentKeys, componentsCfg).length > 0
                   ? // In substep: only disable on last when cannot finish
-                    (componentEditIndex === componentKeys.filter((k) => componentsCfg[k].enabled).length - 1 && !canFinish)
+                    (componentEditIndex === getOrderedComponentKeys(componentKeys, componentsCfg).length - 1 && !canFinish)
                   : false)
               }
             >
               {step === 3
                 ? componentEditIndex === null
-                  ? (componentKeys.filter((k) => componentsCfg[k].enabled).length > 0 ? "Avançar" : "Concluir")
-                  : (componentEditIndex < componentKeys.filter((k) => componentsCfg[k].enabled).length - 1 ? "Próximo" : "Concluir")
+                  ? (getOrderedComponentKeys(componentKeys, componentsCfg).length > 0 ? "Avançar" : "Concluir")
+                  : (componentEditIndex < getOrderedComponentKeys(componentKeys, componentsCfg).length - 1 ? "Próximo" : "Concluir")
                 : "Avançar"}
             </Button>
           </>
@@ -405,6 +419,13 @@ const ProjectForm = () => {
                 </div>
               )}
             />
+            <div className="pt-2">
+              <PaletteSelector
+                value={selectedPalette}
+                onChange={setSelectedPalette}
+                title="Paleta de cores do site"
+              />
+            </div>
           </div>
         )}
         {step === 2 && (
@@ -421,7 +442,7 @@ const ProjectForm = () => {
           ) : (
             <ComponentPromptsStep
               isPending={isPending}
-              orderedKeys={componentKeys.filter((k) => componentsCfg[k].enabled)}
+              orderedKeys={getOrderedComponentKeys(componentKeys, componentsCfg)}
               index={componentEditIndex}
               componentsCfg={componentsCfg}
               setComponentsCfg={setComponentsCfg}

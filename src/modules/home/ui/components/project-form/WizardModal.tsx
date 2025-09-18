@@ -38,14 +38,14 @@ export function WizardModal({ open, step, children, footer, beforeFooter, subSte
         className={cn(
           "bg-background border rounded-xl shadow-2xl overflow-hidden transition-all duration-500 ease-out",
           "w-80 h-80 scale-50 opacity-0",
-          open && "scale-100 opacity-100 w-[80vw] h-[70vh] max-w-3xl max-h-[60vh]"
+          open && "scale-100 opacity-100 w-[95vw] h-[85vh] max-w-[95vw] max-h-[90vh] md:w-[80vw] md:h-[70vh] md:max-w-3xl md:max-h-[75vh]"
         )}
         onClick={(e) => e.stopPropagation()} // Prevent closing when clicking inside
       >
         <div className="flex flex-col h-full">
-          <div className="flex flex-1">
+          <div className="flex flex-1 flex-col md:flex-row min-h-0">
             <WizardStepper step={step} subStepLabel={subStepLabel} />
-            <div className="flex-1 p-6 overflow-y-auto">
+            <div className="flex-1 min-w-0 p-6 overflow-hidden">
               {children}
             </div>
           </div>

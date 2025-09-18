@@ -5,7 +5,7 @@ import TextareaAutosize from "react-textarea-autosize";
 import { Label } from "../../../../../components/ui/label";
 import { cn } from "../../../../../lib/utils";
 import type { ComponentKey, ComponentConfig } from "./types";
-import { COMPONENT_TRANSLATIONS } from "./types";
+import { COMPONENT_TRANSLATIONS, getOrderedComponentKeys } from "./types";
 
 type Props = {
   isPending: boolean;
@@ -15,6 +15,11 @@ type Props = {
 };
 
 export function ComponentsStep({ isPending, componentKeys, componentsCfg, setComponentsCfg }: Props) {
+  const orderedKeys = getOrderedComponentKeys(componentKeys, componentsCfg);
+  const getDisplayOrder = (key: ComponentKey) => {
+    const index = orderedKeys.indexOf(key);
+    return index >= 0 ? index + 1 : null;
+  };
   const handleComponentToggle = (key: ComponentKey) => {
     setComponentsCfg((prev) => {
       const newCfg = { ...prev };
@@ -62,9 +67,9 @@ export function ComponentsStep({ isPending, componentKeys, componentsCfg, setCom
                   selected && "border-primary bg-primary/5"
                 )}
               >
-                {selected && componentsCfg[key].order && (
+                {selected && (
                   <div className="absolute -top-1 -left-1 w-5 h-5 bg-primary text-primary-foreground text-xs font-bold rounded-full flex items-center justify-center">
-                    {componentsCfg[key].order}
+                    {getDisplayOrder(key)}
                   </div>
                 )}
                 <div className="font-medium text-sm">{COMPONENT_TRANSLATIONS[key]}</div>

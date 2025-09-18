@@ -661,6 +661,7 @@ export const codeAgentFunction = inngest.createFunction(
       | {
           analytics?: { provider: string; code?: string };
           components?: Record<string, { enabled: boolean; prompt?: string; border?: { enabled: boolean; prompt?: string } }>;
+          theme?: { paletteId: string; paletteName: string; colors: string[] };
         }
       | undefined;
 
@@ -676,6 +677,9 @@ export const codeAgentFunction = inngest.createFunction(
               (c, i) => ` ${i + 1}. ${c.key}${c.prompt ? `\n    prompt: ${c.prompt}` : ""}${c.borderPrompt ? `\n    border: ${c.borderPrompt}` : ""}`
             )
             .join("\n")}`
+        : "",
+      customization?.theme
+        ? `\n\nColor palette (4 colors, use as base tokens): ${customization.theme.paletteName} — ${customization.theme.colors.join(", ")}`
         : "",
       customization?.analytics && customization.analytics.provider !== "none"
         ? `\n\nAnalytics: ${customization.analytics.provider}${customization.analytics.code ? ` (${customization.analytics.code.slice(0, 40)}...)` : ""}`

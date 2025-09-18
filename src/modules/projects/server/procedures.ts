@@ -68,6 +68,15 @@ export const projectsRouter = createTRPCRouter({
                   .optional(),
               })
             ),
+            theme: z
+              .object({
+                paletteId: z.string(),
+                paletteName: z.string(),
+                colors: z
+                  .array(z.string().regex(/^#?[0-9A-Fa-f]{6}$/))
+                  .length(4),
+              })
+              .optional(),
           })
           .optional(),
       })

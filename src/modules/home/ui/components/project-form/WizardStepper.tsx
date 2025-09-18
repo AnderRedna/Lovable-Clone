@@ -15,7 +15,7 @@ const labels: Record<1 | 2 | 3, string> = {
 
 export function WizardStepper({ step, subStepLabel }: Props) {
   return (
-    <div className="w-1/4 bg-muted/50 p-6 border-r flex flex-col justify-center">
+    <div className="md:w-1/4 w-full bg-muted/50 p-4 md:p-6 md:border-r border-b md:border-b-0 flex md:flex-col justify-center md:justify-start max-h-[30vh] md:max-h-none overflow-x-auto md:overflow-visible">
       <div className="space-y-6">
         {[1, 2, 3].map((s, index) => {
           const isActive = step === (s as 1 | 2 | 3);

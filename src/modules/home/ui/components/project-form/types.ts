@@ -40,3 +40,34 @@ export const COMPONENT_TRANSLATIONS: Record<ComponentKey, string> = {
   Testimonials: "Depoimentos",
   Video: "Vídeo",
 };
+
+export function getOrderedComponentKeys(
+  componentKeys: ComponentKey[],
+  componentsCfg: Record<ComponentKey, ComponentConfig>
+): ComponentKey[] {
+  const enabledKeys = componentKeys.filter((k) => componentsCfg[k].enabled);
+
+  if (enabledKeys.length === 0) return [];
+
+  // Header sempre vem primeiro
+  const headerKey = enabledKeys.find(k => k === "Header");
+  // Footers sempre vem por último
+  const footerKey = enabledKeys.find(k => k === "Footers");
+
+  // Componentes do meio, ordenados pela ordem de seleção
+  const middleKeys = enabledKeys
+    .filter(k => k !== "Header" && k !== "Footers")
+    .sort((a, b) => {
+      const orderA = componentsCfg[a].order || 0;
+      const orderB = componentsCfg[b].order || 0;
+      return orderA - orderB;
+    });
+
+  // Monta a ordem final: Header + componentes do meio + Footers
+  const result: ComponentKey[] = [];
+  if (headerKey) result.push(headerKey);
+  result.push(...middleKeys);
+  if (footerKey) result.push(footerKey);
+
+  return result;
+}
