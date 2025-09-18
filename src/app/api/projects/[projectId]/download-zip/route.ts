@@ -28,6 +28,10 @@ export async function GET(
 
     const zip = new JSZip();
 
+    // Hardcoded project title/description as requested
+    const projectTitle = "LandingPage";
+    const projectDescription = "Landing Page criada no Landinfy.com";
+
     // Collect all generated files content to detect dependencies
     let allFilesContent = '';
     fragments.forEach((fragment: Fragment) => {
@@ -356,9 +360,16 @@ module.exports = nextConfig
       }, null, 2),
       // Provide a minimal layout only if the fragment doesn't include one.
       'app/layout.tsx': `import './globals.css'
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: ${JSON.stringify(projectTitle)},
+  description: ${JSON.stringify(projectDescription)}
+}
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="pt-BR">
       <body>{children}</body>
     </html>
   )
