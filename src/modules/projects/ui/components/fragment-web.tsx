@@ -104,7 +104,7 @@ const FragmentWeb = ({ data, isEditing, registerCollector }: FragmentWebProps) =
   return (
     <div className="flex flex-col w-full h-full">
   <div className="p-2 border-b bg-sidebar flex items-center gap-x-2 relative">
-        <Hint text="Click to refresh" side="bottom" align="start">
+        <Hint text="Clique para atualizar" side="bottom" align="start">
           <Button size="sm" variant="outline" onClick={onRefresh}>
             <RefreshCcwIcon />
           </Button>

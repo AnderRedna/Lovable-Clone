@@ -65,7 +65,7 @@ export async function fetchMorePalettes(): Promise<ColorPalette[]> {
         colors: [toHex(arr[0]), toHex(arr[1]), toHex(arr[2]), toHex(arr[3])],
       }));
 
-    return mapped.slice(0, 32);
+    return mapped;
   } catch {
     return [];
   }

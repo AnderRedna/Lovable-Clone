@@ -16,8 +16,9 @@ import { PROJECT_TEMPLATES } from "@/constants";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 import { useRouter } from "next/navigation";
-import { WizardModal, AnalyticsStep, ComponentsStep, ComponentPromptsStep } from "./project-form/index";
-import { PaletteSelector } from "./project-form/PaletteSelector";
+import { AnalyticsStep, ComponentsStep, ComponentPromptsStep } from "./project-form/index";
+import { WizardModal } from "./project-form/WizardModal";
+import { ProjectWizard } from "./project-form/ProjectWizard";
 import type { ColorPalette } from "./project-form/PaletteSelector";
 import { getOrderedComponentKeys } from "./project-form/types";
 
@@ -113,8 +114,8 @@ const ProjectForm = () => {
 
   const [isFocused, setIsFocused] = useState(false);
   const [isCustomizing, setIsCustomizing] = useState(false);
-  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [wizardActive, setWizardActive] = useState(false);
+  // legacy step state removed; new wizard handles steps dynamically
   const [componentEditIndex, setComponentEditIndex] = useState<number | null>(null);
   const [selectedPalette, setSelectedPalette] = useState<ColorPalette | null>(null);
 
@@ -151,8 +152,7 @@ const ProjectForm = () => {
   );
 
   const resetWizard = () => {
-    setStep(1);
-  setWizardActive(false);
+    setWizardActive(false);
   setComponentEditIndex(null);
     setAnalytics({ provider: "none", code: "" });
     setComponentsCfg(
@@ -187,22 +187,10 @@ const ProjectForm = () => {
     // Start wizard on first submit click
     if (!wizardActive) {
       setWizardActive(true);
-      setStep(2); // Start from step 2 (Monitoramento)
       return;
     }
 
-    // Wizard flow when active
-    if (step === 1) {
-      if (!canAdvanceFromStep1) return;
-      setStep(2);
-      return;
-    }
-    if (step === 2) {
-      if (!canAdvanceFromStep2) return;
-      setStep(3);
-      return;
-    }
-    // step 3 -> component prompts (3.1) flow
+    // Component prompts flow when wizard concluded to components prompts
     const enabledKeys = getOrderedComponentKeys(componentKeys, componentsCfg);
     const lastIndex = enabledKeys.length - 1;
 
@@ -311,12 +299,12 @@ const ProjectForm = () => {
                 className={cn(
                   "size-8 rounded-full",
                   (wizardActive
-                    ? (step === 1 && !canAdvanceFromStep1) || (step === 2 && !canAdvanceFromStep2) || (step === 3 && !canFinish)
+                    ? componentEditIndex === null
                     : (isCustomizing ? !canAdvanceFromStep1 || isPending : isDisabled)) && "bg-muted-foreground border"
                 )}
                 disabled={
                   wizardActive
-                    ? (step === 1 && !canAdvanceFromStep1) || (step === 2 && !canAdvanceFromStep2) || (step === 3 && !canFinish)
+                    ? componentEditIndex === null // while the main wizard is open, use its own footer
                     : (isCustomizing ? !canAdvanceFromStep1 || isPending : isDisabled)
                 }
               >
@@ -342,114 +330,66 @@ const ProjectForm = () => {
         </div>
       </section>
 
-      {/* Wizard Modal */}
-      <WizardModal
-        open={wizardActive}
-        step={step}
+      {/* New Project Wizard */}
+      <ProjectWizard
+        open={wizardActive && componentEditIndex === null}
         onClose={resetWizard}
-        subStepLabel={step === 3 && componentEditIndex !== null ? `3.${componentEditIndex + 1}` : undefined}
-        footer={
-          <>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                if (step === 3 && componentEditIndex !== null) {
-                  // Inside component prompts substep
+        selectedPalette={selectedPalette}
+        setSelectedPalette={setSelectedPalette}
+        analytics={analytics}
+        setAnalytics={setAnalytics}
+        componentKeys={componentKeys}
+        componentsCfg={componentsCfg}
+        setComponentsCfg={setComponentsCfg}
+        isPending={isPending}
+        canFinish={canFinish}
+        onFinish={async () => {
+          // If there are enabled components, open prompts subflow
+          const enabledKeys = getOrderedComponentKeys(componentKeys, componentsCfg);
+          if (enabledKeys.length > 0) {
+            setComponentEditIndex(0);
+            return;
+          }
+          // Otherwise submit
+          await form.handleSubmit(onSubmit)();
+        }}
+      />
+      {/* Prompts subflow modal (reusing arrow behavior) */}
+      {componentEditIndex !== null && (
+        <WizardModal
+          open={true}
+          steps={["Componentes", "Prompts"]}
+          stepIndex={1}
+          onClose={() => setComponentEditIndex(null)}
+          footer={
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
                   setComponentEditIndex((i) => {
                     if (i && i > 0) return i - 1;
-                    return null; // go back to components grid
+                    return null;
                   });
-                  return;
-                }
-                if (step > 1) {
-                  setStep((s) => (s - 1) as 1 | 2 | 3);
-                } else {
-                  resetWizard();
-                }
-              }}
-            >
-              {step === 1 ? "Cancelar" : step === 3 && componentEditIndex !== null ? "Anterior" : "Voltar"}
-            </Button>
-            <Button
-              type="button"
-              onClick={handleArrowAction}
-              disabled={
-                (step === 1 && !canAdvanceFromStep1) ||
-                (step === 2 && !canAdvanceFromStep2) ||
-                (step === 3 && componentEditIndex !== null && getOrderedComponentKeys(componentKeys, componentsCfg).length > 0
-                  ? // In substep: only disable on last when cannot finish
-                    (componentEditIndex === getOrderedComponentKeys(componentKeys, componentsCfg).length - 1 && !canFinish)
-                  : false)
-              }
-            >
-              {step === 3
-                ? componentEditIndex === null
-                  ? (getOrderedComponentKeys(componentKeys, componentsCfg).length > 0 ? "Avançar" : "Concluir")
-                  : (componentEditIndex < getOrderedComponentKeys(componentKeys, componentsCfg).length - 1 ? "Próximo" : "Concluir")
-                : "Avançar"}
-            </Button>
-          </>
-        }
-      >
-        {step === 1 && (
-          <div className="space-y-4">
-            <h2 className="text-lg font-semibold">Informações básicas</h2>
-            <FormField
-              control={form.control}
-              name="value"
-              render={({ field }) => (
-                <div>
-                  <TextareaAutosize
-                    {...field}
-                    placeholder="Descreva a landing page que você deseja criar."
-                    onFocus={() => setIsFocused(true)}
-                    onBlur={() => setIsFocused(false)}
-                    minRows={6}
-                    maxRows={17}
-                    className="w-full resize-none rounded-md border bg-transparent p-2 text-sm"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && e.ctrlKey) {
-                        e.preventDefault();
-                        handleArrowAction();
-                      }
-                    }}
-                    disabled={isPending}
-                  />
-                </div>
-              )}
-            />
-            <div className="pt-2">
-              <PaletteSelector
-                value={selectedPalette}
-                onChange={setSelectedPalette}
-                title="Paleta de cores do site"
-              />
-            </div>
-          </div>
-        )}
-        {step === 2 && (
-          <AnalyticsStep isPending={isPending} analytics={analytics} setAnalytics={setAnalytics} />
-        )}
-        {step === 3 && (
-          componentEditIndex === null ? (
-            <ComponentsStep
-              isPending={isPending}
-              componentKeys={componentKeys}
-              componentsCfg={componentsCfg}
-              setComponentsCfg={setComponentsCfg}
-            />
-          ) : (
-            <ComponentPromptsStep
-              isPending={isPending}
-              orderedKeys={getOrderedComponentKeys(componentKeys, componentsCfg)}
-              index={componentEditIndex}
-              componentsCfg={componentsCfg}
-              setComponentsCfg={setComponentsCfg}
-            />
-          )
-        )}
-      </WizardModal>
+                }}
+              >
+                Voltar
+              </Button>
+              <Button type="button" onClick={handleArrowAction} disabled={!canFinish}>
+                Próximo
+              </Button>
+            </>
+          }
+        >
+          <ComponentPromptsStep
+            isPending={isPending}
+            orderedKeys={getOrderedComponentKeys(componentKeys, componentsCfg)}
+            index={componentEditIndex}
+            componentsCfg={componentsCfg}
+            setComponentsCfg={setComponentsCfg}
+          />
+        </WizardModal>
+      )}
     </Form>
   );
 };

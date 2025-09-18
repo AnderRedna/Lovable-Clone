@@ -29,13 +29,37 @@ export function PaletteSelector({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Ensure we have at least 12 options on first load
+  useEffect(() => {
+    let cancelled = false;
+    const hydrate = async () => {
+      if (palettes.length >= 12) return;
+      const more = await fetchMorePalettes();
+      if (cancelled) return;
+      const filled = [...curatedPalettes, ...more].slice(0, 12);
+      setPalettes(filled);
+    };
+    hydrate();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const handleRefresh = async () => {
     const more = await fetchMorePalettes();
     if (more.length) {
-      const key = (p: ColorPalette) => `${p.id}-${p.colors.join(",")}`;
-      const merged = [...palettes, ...more];
-      const unique = Array.from(new Map(merged.map((p) => [key(p), p])).values());
-      setPalettes(unique);
+      // pick 12 unique random palettes
+      const pool = more; // already up to 32
+      const picked: ColorPalette[] = [];
+      const used = new Set<number>();
+      while (picked.length < 12 && used.size < pool.length) {
+        const idx = Math.floor(Math.random() * pool.length);
+        if (!used.has(idx)) {
+          used.add(idx);
+          picked.push(pool[idx]);
+        }
+      }
+      setPalettes(picked);
     }
   };
 
@@ -43,9 +67,10 @@ export function PaletteSelector({
     selected && p.colors.join(",") === selected.colors.join(",");
 
   const grid = useMemo(() => {
+    const displayed = palettes.slice(0, 12);
     return (
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-56 md:max-h-64 overflow-y-auto pr-1">
-        {palettes.map((p) => (
+      <div className="grid grid-cols-3 gap-3 overflow-y-auto pr-1 nice-scroll">
+        {displayed.map((p) => (
           <button
             key={`${p.id}-${p.colors.join(",")}`}
             type="button"

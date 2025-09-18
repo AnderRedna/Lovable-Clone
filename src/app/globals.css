@@ -245,4 +245,24 @@
   /* Repeat pattern to fill the whole page height */
   background-repeat: repeat;
   }
+
+  /* Nice thin scrollbar for scrollable panels */
+  .nice-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--muted-foreground) transparent;
+  }
+  .nice-scroll::-webkit-scrollbar {
+    width: 8px;
+  }
+  .nice-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .nice-scroll::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
+    border-radius: 999px;
+    border: 2px solid transparent;
+  }
+  .nice-scroll:hover::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--muted-foreground) 80%, transparent);
+  }
 }

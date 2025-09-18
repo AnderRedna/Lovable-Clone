@@ -6,15 +6,15 @@ import { WizardStepper } from "./WizardStepper";
 
 type Props = {
   open: boolean;
-  step: 1 | 2 | 3;
+  steps: string[];
+  stepIndex: number; // 0-based
   children: React.ReactNode;
   footer: React.ReactNode;
   beforeFooter?: React.ReactNode;
-  subStepLabel?: string;
   onClose?: () => void;
 };
 
-export function WizardModal({ open, step, children, footer, beforeFooter, subStepLabel, onClose }: Props) {
+export function WizardModal({ open, steps, stepIndex, children, footer, beforeFooter, onClose }: Props) {
   useEffect(() => {
     if (open) {
       document.body.classList.add("overflow-hidden");
@@ -44,7 +44,7 @@ export function WizardModal({ open, step, children, footer, beforeFooter, subSte
       >
         <div className="flex flex-col h-full">
           <div className="flex flex-1 flex-col md:flex-row min-h-0">
-            <WizardStepper step={step} subStepLabel={subStepLabel} />
+            <WizardStepper labels={steps} current={stepIndex} />
             <div className="flex-1 min-w-0 p-6 overflow-hidden">
               {children}
             </div>
