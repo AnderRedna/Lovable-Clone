@@ -135,7 +135,7 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
               )}
             </TabsContent>
             <TabsContent value="code" className="min-h-0">
-              <TechFeedbackForm />
+              {!activeFragment?.files && <TechFeedbackForm />}
               {activeFragment?.files ? (
                 <FileExplorer files={activeFragment.files as FileCollection} projectId={projectId} />
               ) : null}

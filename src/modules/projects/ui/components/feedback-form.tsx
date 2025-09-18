@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Star, MessageCircle, Linkedin, Users, MoreHorizontal, ChevronRight, ArrowLeft, Check, X } from "lucide-react";
 import emailjs from "emailjs-com";
 import "./feedback-form.css";
+
+const STORAGE_KEY = "generalFeedback";
 
 const FeedbackForm: React.FC = () => {
   const [currentStep, setCurrentStep] = useState(0);
@@ -17,10 +19,37 @@ const FeedbackForm: React.FC = () => {
   const [submitted, setSubmitted] = useState(false);
 
   const resetForm = () => {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {}
     setSubmitted(false);
     setCurrentStep(0);
     setFormData({ heardFrom: "", experience: "", recommend: "", suggestions: "", outrosText: "" });
   };
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.submitted) {
+          setSubmitted(true);
+        } else if (parsed?.data) {
+          setFormData(parsed.data);
+        }
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ data: formData, submitted })
+      );
+    } catch {}
+  }, [formData, submitted]);
 
   const steps = [
     {
