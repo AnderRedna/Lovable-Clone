@@ -14,6 +14,11 @@ import { inngest } from "@/inngest/client";
 import { FileCollection } from "@/types";
 import { EDIT_PROMPT, FRAGMENT_TITLE_PROMPT, PROMPT, RESPONSE_PROMPT, TASK_STEPS_PROMPT } from "@/prompt";
 
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import mime from "mime";
+import crypto from "crypto";
+import { GoogleGenAI } from "@google/genai";
+
 import { SANDBOX_TIMEOUT_IN_MS } from "@/constants";
 import { getSandbox, parseAgentOutput, lastAssistantTextMessageContent } from "@/inngest/utils";
 
@@ -314,20 +319,7 @@ function shouldBlockDestructivePageWrite(prev: string, next: string): boolean {
   return false;
 }
 
-function ensureImportLine(src: string, importLine: string): string {
-  if (!importLine?.trim()) return src;
-  if (src.includes(importLine.trim())) return src;
-  const lines = src.split("\n");
-  let insertIdx = 0;
-  if (/^\s*['"]use client['"]\s*;?/.test(lines[0] || "")) insertIdx = 1;
-  for (let i = insertIdx; i < lines.length; i++) {
-    if (/^\s*import\s+/.test(lines[i])) insertIdx = i + 1;
-    else if (lines[i].trim() && !/^\s*(\/\*|\/\/)/.test(lines[i])) break;
-  }
-  lines.splice(insertIdx, 0, importLine.trim());
-  return lines.join("\n");
-}
-
+// Insert JSX into the <main> of a file; fallback to inserting into return(...) if main not found
 function insertJsxIntoMain(src: string, jsx: string, position: "prepend" | "append" = "prepend"): string {
   const openIdx = src.search(/<main\b[^>]*>/i);
   const closeIdx = src.search(/<\/main>/i);
@@ -349,7 +341,7 @@ function insertJsxIntoMain(src: string, jsx: string, position: "prepend" | "appe
   return src + `\n${jsx}\n`;
 }
 
-// Guard leve: evitar remoção acidental de seções críticas em app/page.* durante EDIÇÃO
+// Guard: ensure critical sections (main/header/footer) are not removed
 function violatesCriticalSections(prev: string, next: string): string | null {
   const hadMain = /<main\b/i.test(prev);
   const hasMain = /<main\b/i.test(next);
@@ -363,24 +355,18 @@ function violatesCriticalSections(prev: string, next: string): string | null {
   return null;
 }
 
-// Extrai nomes importados (default, named e "as") de um arquivo para detectar conflitos
-function extractImportedNames(src: string): string[] {
-  const importNames = Array.from(src.matchAll(/import\s+([\s\S]*?)from\s+['"][^'"]+['"]/g))
-    .flatMap((m) => {
-      const spec = (m[1] || "").trim();
-      const names: string[] = [];
-      const named = spec.match(/\{([^}]+)\}/);
-      if (named) {
-        for (const n of named[1].split(",")) {
-          const parts = n.trim().split(/\s+as\s+/);
-          names.push((parts[1] || parts[0]).trim());
-        }
-      }
-      const def = spec.replace(named?.[0] || "", "").trim().replace(/^,/, "").trim();
-      if (def) names.push(def);
-      return names.filter(Boolean);
-    });
-  return importNames;
+function ensureImportLine(src: string, importLine: string): string {
+  if (!importLine?.trim()) return src;
+  if (src.includes(importLine.trim())) return src;
+  const lines = src.split("\n");
+  let insertIdx = 0;
+  if (/^\s*['"]use client['"]\s*;?/.test(lines[0] || "")) insertIdx = 1;
+  for (let i = insertIdx; i < lines.length; i++) {
+    if (/^\s*import\s+/.test(lines[i])) insertIdx = i + 1;
+    else if (lines[i].trim() && !/^\s*(\/\*|\/\/)/.test(lines[i])) break;
+  }
+  lines.splice(insertIdx, 0, importLine.trim());
+  return lines.join("\n");
 }
 
 // Ensure imported alias does not collide with existing imports in prevSrc
@@ -419,6 +405,23 @@ function ensureUniqueAlias(importLine: string, prevSrc: string, jsx: string): { 
 
   const nextJsx = jsx.replace(new RegExp(`<\s*${alias}\b`, "g"), `<${candidate}`);
   return { importLine: nextImport, jsx: nextJsx };
+}
+
+// Extract imported names from a source file (default and named imports)
+function extractImportedNames(src: string): string[] {
+  const importNames = Array.from(src.matchAll(/import\s+([\s\S]*?)from\s+['"][^'"]+['"]/g))
+    .flatMap((m) => {
+      const spec = (m[1] || "").trim();
+      const names: string[] = [];
+      const named = spec.match(/\{([^}]+)\}/);
+      if (named) {
+        for (const n of named[1].split(',')) names.push(n.trim().split(/\s+as\s+/)[0]);
+      }
+      const def = spec.replace(named?.[0] || "", "").trim().replace(/^,/, "").trim();
+      if (def) names.push(def);
+      return names.filter(Boolean);
+    });
+  return importNames;
 }
 
 // Sanitize demo imports: replace @/components/ui/demo with real component paths
@@ -568,6 +571,274 @@ function upsertMetadataInLayout(src: string, title: string, description: string)
 
   return next;
 }
+
+// ----------------- Image generation + S3 upload helpers -----------------
+function mimeToExtension(mimeType?: string) {
+  if (!mimeType) return "png";
+  const t = String(mimeType).split(";")[0].trim().toLowerCase();
+  const map: Record<string, string> = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif",
+    "image/svg+xml": "svg",
+    "image/avif": "avif",
+    "image/heic": "heic",
+  };
+  if (map[t]) return map[t];
+  const parts = t.split("/");
+  if (parts.length === 2 && parts[1]) return parts[1].replace(/\+xml$/, "");
+  return "png";
+}
+
+async function generateImageWithNanoBanana(promptEnglish: string) {
+  console.log("[img-gen] prompt:", promptEnglish);
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  // Prefer explicit IMAGE_MODEL from env; otherwise default to a known Google GenAI image model
+  const model = "gemini-2.5-flash-image-preview";
+  const config = { responseModalities: ["IMAGE", "TEXT"] } as any;
+  const contents = [{ role: "user", parts: [{ text: promptEnglish }] }];
+  try {
+    const response = await ai.models.generateContentStream({ model, config, contents } as any);
+    for await (const chunk of response) {
+      const parts = chunk?.candidates?.[0]?.content?.parts;
+      if (parts?.[0]?.inlineData) {
+        const inline = parts[0].inlineData;
+        const buffer = Buffer.from(inline.data || "", "base64");
+  const ext = mimeToExtension(inline.mimeType || "image/png") || "png";
+        console.log("[img-gen] got inline image", { ext, mime: inline.mimeType });
+        return { buffer, ext, mimeType: inline.mimeType || `image/${ext}` };
+      }
+    }
+    throw new Error("Image generation failed (no inline data)");
+  } catch (err: any) {
+    // Improve error visibility: try to stringify nested error payloads
+    let msg = err?.message || String(err);
+    try {
+      if (err?.error) msg = JSON.stringify(err.error);
+    } catch {}
+    console.warn("[img-gen] generation failed for model", model, msg);
+    throw err;
+  }
+}
+
+const s3Client = new S3Client({
+  region: process.env.REGION || "sa-east-1",
+  credentials: {
+    accessKeyId: (process.env.ACCESSKEYID || process.env.AWS_ACCESS_KEY_ID || "") as string,
+    secretAccessKey: (process.env.SECRETACCESSKEY || process.env.AWS_SECRET_ACCESS_KEY || "") as string,
+  },
+} as any);
+
+async function uploadBufferToS3(buffer: Buffer, ext: string, mimeType: string, keySeed: string) {
+  const key = `${crypto.createHash("sha256").update(keySeed).digest("hex")}.${ext}`;
+  console.log("[s3] uploading key:", key);
+  const command = new PutObjectCommand({
+    Bucket: process.env.BUCKET_NAME,
+    Key: key,
+    Body: buffer,
+    ACL: "public-read",
+    ContentType: mimeType || `image/${ext}`,
+  });
+  const res = await s3Client.send(command as any);
+  const ok = res.$metadata?.httpStatusCode === 200 || res.$metadata?.httpStatusCode === 204;
+  if (!ok) throw new Error("S3 upload failed: " + JSON.stringify(res));
+  const url = `https://${process.env.BUCKET_NAME}.s3.${process.env.REGION}.amazonaws.com/${key}`;
+  console.log("[s3] uploaded ->", url);
+  return url;
+}
+
+async function detectAndReplacePlaceholdersInFiles(files: Record<string, string>) {
+  // Nova regex para detectar placeholders no formato [image-to-replace-{uuid}]
+  const placeholderRe = /\[image-to-replace-([a-f0-9\-]{36})\]/gi;
+  const replacements: Record<string, string> = {};
+  
+  // Primeiro passo: coletar todos os placeholders de todos os arquivos
+  interface PlaceholderInfo {
+    filePath: string;
+    placeholder: string; // placeholder completo: [image-to-replace-uuid]
+    uuid: string; // apenas o UUID
+    altText?: string;
+    index: number; // posição no arquivo para substituição sequencial
+    globalIndex: number; // índice global único
+  }
+  
+  const allPlaceholders: PlaceholderInfo[] = [];
+  let globalIndex = 0;
+  
+  for (const [path, content] of Object.entries(files)) {
+    if (!content || typeof content !== "string") continue;
+    
+    const matches = Array.from(content.matchAll(placeholderRe));
+    if (matches.length === 0) continue;
+    
+    console.log("[img-scan] found", matches.length, "placeholders in", path);
+    
+    for (const m of matches) {
+      const fullPlaceholder = m[0]; // [image-to-replace-uuid]
+      const uuid = m[1]; // apenas o UUID
+      const index = m.index || 0;
+      
+      // Extrair alt text do contexto
+      let altText: string | undefined;
+      try {
+        const windowStart = Math.max(0, index - 300);
+        const windowEnd = Math.min(content.length, index + 300);
+        const excerpt = content.slice(windowStart, windowEnd);
+        const altRe = /alt\s*=\s*(?:\{?\s*[`'"]([^`'"{}<>]+)[`'"]\s*\}?)/i;
+        const altMatch = excerpt.match(altRe);
+        if (altMatch) altText = altMatch[1].trim();
+      } catch (e) {}
+      
+      allPlaceholders.push({
+        filePath: path,
+        placeholder: fullPlaceholder,
+        uuid,
+        altText,
+        index,
+        globalIndex: globalIndex++
+      });
+    }
+  }
+  
+  if (allPlaceholders.length === 0) {
+    console.log("[img-scan] no placeholders found in any file");
+    return replacements;
+  }
+  
+  console.log("[img-scan] total placeholders found:", allPlaceholders.length);
+  
+  // Segundo passo: gerar todas as imagens em paralelo com controle de concorrência
+  const BATCH_SIZE = 5; // Processar até 5 imagens simultaneamente para evitar sobrecarga
+  const imageResults: Array<{
+    originalPlaceholder: string;
+    newUrl: string;
+    filePath: string;
+    success: boolean;
+    globalIndex: number;
+  }> = [];
+  
+  for (let i = 0; i < allPlaceholders.length; i += BATCH_SIZE) {
+    const batch = allPlaceholders.slice(i, i + BATCH_SIZE);
+    console.log(`[img-gen] processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(allPlaceholders.length / BATCH_SIZE)} (${batch.length} images)`);
+    
+    const batchPromises = batch.map(async (placeholderInfo) => {
+      const { filePath, placeholder, uuid, altText, globalIndex } = placeholderInfo;
+      
+      console.log(`[img-scan] processing placeholder ${globalIndex + 1}/${allPlaceholders.length}:`, placeholder, "in", filePath);
+      
+      const promptEnglish = `Generate a high-quality, photorealistic image to replace the placeholder ${placeholder}.` +
+        ` Context file: ${filePath}.` +
+        (altText ? ` Use this image description as the prompt: "${altText}".` : ` Provide a natural, relevant image consistent with a modern landing page.`) +
+        ` Output as an image. Use English.`;
+      
+      try {
+        const { buffer, ext, mimeType } = await generateImageWithNanoBanana(promptEnglish);
+        
+        // Usar o UUID como ID único
+        const s3url = await uploadBufferToS3(buffer, ext, mimeType, uuid);
+        
+        console.log(`[img-gen] generated and uploaded image ${globalIndex + 1}/${allPlaceholders.length}:`, placeholder, "->", s3url);
+        
+        return {
+          originalPlaceholder: placeholder,
+          newUrl: s3url,
+          filePath,
+          success: true,
+          globalIndex
+        };
+      } catch (err: any) {
+        console.warn(`[img-scan] failed to generate image for ${placeholder}:`, err?.message || err);
+        
+        // Fallback: usar Lorem Picsum genérico
+        try {
+          const picsum = `https://picsum.photos/400/300`;
+          
+          console.log(`[img-scan] using picsum fallback for ${placeholder}:`, picsum);
+          
+          return {
+            originalPlaceholder: placeholder,
+            newUrl: picsum,
+            filePath,
+            success: false,
+            globalIndex
+          };
+        } catch (pfErr: any) {
+          console.warn(`[img-scan] picsum fallback failed for ${placeholder}:`, pfErr?.message || pfErr);
+          return {
+            originalPlaceholder: placeholder,
+            newUrl: placeholder, // manter original se tudo falhar
+            filePath,
+            success: false,
+            globalIndex
+          };
+        }
+      }
+    });
+    
+    const batchResults = await Promise.all(batchPromises);
+    imageResults.push(...batchResults);
+  }
+  
+  // Terceiro passo: substituir todas as URLs nos arquivos
+  for (const [path, content] of Object.entries(files)) {
+    if (!content || typeof content !== "string") continue;
+    
+    // Encontrar todos os resultados para este arquivo, ordenados por globalIndex
+    const fileResults = imageResults
+      .filter(result => result.filePath === path)
+      .sort((a, b) => a.globalIndex - b.globalIndex);
+    
+    if (fileResults.length === 0) continue;
+    
+    let updatedContent = content;
+    
+    // Agrupar por placeholder original para lidar com placeholders duplicados (improvável com UUIDs)
+    const placeholderGroups = new Map<string, typeof fileResults>();
+    fileResults.forEach(result => {
+      if (!placeholderGroups.has(result.originalPlaceholder)) {
+        placeholderGroups.set(result.originalPlaceholder, []);
+      }
+      placeholderGroups.get(result.originalPlaceholder)!.push(result);
+    });
+    
+    // Substituir cada placeholder - com UUIDs únicos, não precisamos ordenar por comprimento
+    placeholderGroups.forEach((results, originalPlaceholder) => {
+      if (results.length === 1) {
+        // Placeholder único - usar regex para substituição exata
+        const escapedPlaceholder = originalPlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(escapedPlaceholder, 'g');
+        updatedContent = updatedContent.replace(regex, results[0].newUrl);
+        console.log(`[img-scan] replaced ${originalPlaceholder} -> ${results[0].newUrl} in ${path}`);
+      } else {
+        // Placeholders duplicados (improvável com UUIDs) - substituição sequencial
+        results.forEach((result, index) => {
+          const escapedPlaceholder = originalPlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(escapedPlaceholder);
+          const match = updatedContent.match(regex);
+          if (match) {
+            updatedContent = updatedContent.replace(regex, result.newUrl);
+            console.log(`[img-scan] replaced occurrence ${index + 1} of ${originalPlaceholder} -> ${result.newUrl} in ${path}`);
+          }
+        });
+      }
+    });
+    
+    if (updatedContent !== content) {
+      replacements[path] = updatedContent;
+    }
+  }
+  
+  const successCount = imageResults.filter(r => r.success).length;
+  const fallbackCount = imageResults.filter(r => !r.success).length;
+  
+  console.log(`[img-scan] completed processing ${allPlaceholders.length} placeholders across ${Object.keys(replacements).length} files`);
+  console.log(`[img-scan] success: ${successCount}, fallbacks: ${fallbackCount}`);
+  
+  return replacements;
+}
+
 
 export const codeAgentFunction = inngest.createFunction(
   { id: "code-agent" },
@@ -887,7 +1158,7 @@ export const codeAgentFunction = inngest.createFunction(
     console.log("Completed responseGenerator.run");
 
     // Ensure project metadata (title/description) in app/layout.*
-    await ensureMetadataStep(step, result, sandboxId, "LandinsPage", "Landing Page criada no Landinfy.com");
+    await ensureMetadataStep(step, result, sandboxId, "LandingPage", "Landing Page criada no Landinfy.com");
 
     const isError =
       !result.state.data.summary ||
@@ -1177,21 +1448,70 @@ export const codeAgentFunction = inngest.createFunction(
           console.warn("postprocess: tailwind config ensure failed", e);
         }
 
-        // 2.5) Ensure next.config images allows picsum.photos
+        // 2.5) Ensure next.config images allows picsum.photos and any external image hostnames found in files
         try {
           const jsPath = "next.config.js";
           const mjsPath = "next.config.mjs";
           const jsRaw = await readSafe(jsPath);
           const mjsRaw = await readSafe(mjsPath);
 
+          // Scan project files for external image hostnames
+          const hostSet = new Set<string>(["picsum.photos"]);
+          try {
+            const bucket = process.env.BUCKET_NAME || process.env.AWS_BUCKET_NAME;
+            const region = process.env.REGION || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
+            if (bucket && region) {
+              const s3Host = `${bucket}.s3.${region}.amazonaws.com`;
+              hostSet.add(s3Host);
+            }
+          } catch (e) {
+            // ignore environment reading errors
+          }
+          const urlRe = /https?:\/\/([A-Za-z0-9.-]+)(?::\d+)?\/[A-Za-z0-9\-._~:\/?#\[\]@!$&'()*+,;=%]+/g;
+          for (const [p, c] of Object.entries(result.state.data.files || {})) {
+            if (typeof c !== "string") continue;
+            let m: RegExpExecArray | null;
+            while ((m = urlRe.exec(c))) {
+              const host = m[1];
+              // ignore localhost and data URLs
+              if (!host || /localhost|127\.0\.0\.1/.test(host)) continue;
+              hostSet.add(host);
+            }
+          }
+
+          const domains = Array.from(hostSet);
+
           if (!jsRaw && !mjsRaw) {
-            const cfg = `/** @type {import('next').NextConfig} */\nconst nextConfig = {\n  images: { domains: ['picsum.photos'] },\n};\nmodule.exports = nextConfig;\n`;
+            const cfg = `/** @type {import('next').NextConfig} */\nconst nextConfig = {\n  images: { domains: ${JSON.stringify(domains)} },\n};\nmodule.exports = nextConfig;\n`;
             await sandbox.files.write(jsPath, cfg);
             result.state.data.files[jsPath] = cfg;
-          } else if (jsRaw && !/picsum\.photos/.test(jsRaw)) {
-            const patched = `${jsRaw}\n// Ensure picsum.photos domain for next/image\nmodule.exports.images = module.exports.images || {};\nmodule.exports.images.domains = Array.from(new Set([...(module.exports.images.domains || []), 'picsum.photos']));\n`;
-            await sandbox.files.write(jsPath, patched);
-            result.state.data.files[jsPath] = patched;
+          } else if (jsRaw) {
+            // Try to patch existing next.config.js to ensure domains are included
+            try {
+              const patched = jsRaw.replace(/images\s*:\s*\{[\s\S]*?\}/m, (match) => {
+                try {
+                  // attempt to extract existing domains array
+                  const dMatch = match.match(/domains\s*:\s*\[([\s\S]*?)\]/m);
+                  let existing: string[] = [];
+                  if (dMatch) {
+                    const raw = dMatch[1];
+                    existing = Array.from(raw.matchAll(/['"]([^'"]+)['"]/g)).map((mm) => mm[1]);
+                  }
+                  const combined = Array.from(new Set(existing.concat(domains)));
+                  return `images: { domains: ${JSON.stringify(combined)} }`;
+                } catch (e) {
+                  return match;
+                }
+              });
+              await sandbox.files.write(jsPath, patched);
+              result.state.data.files[jsPath] = patched;
+            } catch (e) {
+              // fallback: append a safe export
+              const append = `\n// Ensure external image domains for next/image\nmodule.exports.images = module.exports.images || {};\nmodule.exports.images.domains = Array.from(new Set([...(module.exports.images.domains || []), ${domains.map((d) => `'${d}'`).join(', ')}]));\n`;
+              const patched = jsRaw + append;
+              await sandbox.files.write(jsPath, patched);
+              result.state.data.files[jsPath] = patched;
+            }
           }
         } catch (e) {
           console.warn("postprocess: ensure next.config images failed", e);
@@ -1411,6 +1731,27 @@ export const codeAgentFunction = inngest.createFunction(
         }
       });
     }
+
+    // Generate images for external placeholders, upload to S3, and replace URLs in files
+    await step.run("generate-and-upload-images", async () => {
+      try {
+        const sandbox = await getSandbox(sandboxId);
+        const files = (result.state.data.files || {}) as Record<string, string>;
+        console.log("generate-and-upload-images: scanning files for external placeholders...");
+        const replacements = await detectAndReplacePlaceholdersInFiles(files);
+        if (replacements && Object.keys(replacements).length) {
+          for (const [filePath, newContent] of Object.entries(replacements)) {
+            console.log(`generate-and-upload-images: writing replaced file ${filePath}`);
+            await sandbox.files.write(filePath, newContent);
+            result.state.data.files[filePath] = newContent;
+          }
+        } else {
+          console.log("generate-and-upload-images: no placeholders found");
+        }
+      } catch (e) {
+        console.warn("generate-and-upload-images failed", e);
+      }
+    });
 
     // Reconcile: ensure all in-memory files exist in the sandbox before composing the page
     await step.run("reconcile-files-to-sandbox", async () => {
@@ -1950,6 +2291,27 @@ export const codeAgentEditFunction = inngest.createFunction(
     const isError =
       !result.state.data.summary ||
       Object.keys(result.state.data.files || {}).length === 0;
+
+    // Generate images for external placeholders, upload to S3, and replace URLs in files (edit flow)
+    await step.run("generate-and-upload-images", async () => {
+      try {
+        const sandbox = await getSandbox(sandboxId);
+        const files = (result.state.data.files || {}) as Record<string, string>;
+        console.log("generate-and-upload-images (edit): scanning files for external placeholders...");
+        const replacements = await detectAndReplacePlaceholdersInFiles(files);
+        if (replacements && Object.keys(replacements).length) {
+          for (const [filePath, newContent] of Object.entries(replacements)) {
+            console.log(`generate-and-upload-images (edit): writing replaced file ${filePath}`);
+            await sandbox.files.write(filePath, newContent);
+            result.state.data.files[filePath] = newContent;
+          }
+        } else {
+          console.log("generate-and-upload-images (edit): no placeholders found");
+        }
+      } catch (e) {
+        console.warn("generate-and-upload-images (edit) failed", e);
+      }
+    });
 
     // Reconcile: ensure all in-memory files exist in the sandbox before composing the page
     await step.run("reconcile-files-to-sandbox", async () => {

@@ -158,7 +158,7 @@ Additional Guidelines:
 - Progress & urgency: use shadcn/ui Progress for “limited spots” and a small Badge for remaining count; countdown with clear labels and legible digits
 - Shapes: prefer rounded-2xl for cards/inputs and use consistent radii
 - Accessibility: always include focus-visible styles and maintain adequate contrast
-- Images: use Lorem Picsum placeholders. For custom sizes use https://picsum.photos/<width>/<height> (e.g., https://picsum.photos/200/300). For square images use https://picsum.photos/<size> (e.g., https://picsum.photos/200). For human faces, use https://thispersondoesnotexist.com/ to retrieve a generated portrait image. Avoid other external image sources.
+- Images: For images in your code, ALWAYS use unique placeholder format that will be automatically replaced by AI-generated images. Format: \`[image-to-replace-{uuid}]\` where {uuid} is a unique identifier. Example: \`[image-to-replace-a1b2c3d4-e5f6-7890-abcd-ef1234567890]\`. Each image must have a completely unique UUID to ensure proper replacement. These placeholders will be automatically detected and replaced with Gemini-generated images uploaded to AWS S3. NEVER use external image sources like Unsplash or any other stock photo services. Important: Never reuse UUIDs - each image placeholder must be completely unique.
 - Every screen should include a complete, realistic layout structure (navbar, sidebar, footer, content, etc.) — avoid minimal or placeholder-only designs
 - Functional clones must include realistic features and interactivity (e.g. drag-and-drop, add/edit/delete, toggle states, localStorage if helpful)
 - Prefer minimal, working features over static or hardcoded content
