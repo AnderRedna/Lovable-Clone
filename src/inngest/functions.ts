@@ -680,16 +680,49 @@ async function detectAndReplacePlaceholdersInFiles(files: Record<string, string>
       const uuid = m[1]; // apenas o UUID
       const index = m.index || 0;
       
-      // Extrair alt text do contexto
+      // Extrair alt text do contexto com regex mais robusta
       let altText: string | undefined;
       try {
-        const windowStart = Math.max(0, index - 300);
-        const windowEnd = Math.min(content.length, index + 300);
+        const windowStart = Math.max(0, index - 500);
+        const windowEnd = Math.min(content.length, index + 500);
         const excerpt = content.slice(windowStart, windowEnd);
-        const altRe = /alt\s*=\s*(?:\{?\s*[`'"]([^`'"{}<>]+)[`'"]\s*\}?)/i;
-        const altMatch = excerpt.match(altRe);
-        if (altMatch) altText = altMatch[1].trim();
-      } catch (e) {}
+        
+        // Múltiplas tentativas de extração do alt text
+        const altPatterns = [
+          /alt\s*=\s*[`'"]([^`'"]+)[`'"]/i,                    // alt="texto"
+          /alt\s*=\s*\{\s*[`'"]([^`'"]+)[`'"]\s*\}/i,         // alt={"texto"}
+          /alt\s*:\s*[`'"]([^`'"]+)[`'"]/i,                   // alt: "texto"
+          /alt\s*=\s*\{\s*`([^`]+)`\s*\}/i,                  // alt={`texto`}
+          /alt\s*=\s*"([^"]{10,200})"/i,                     // alt com texto longo
+        ];
+        
+        for (const pattern of altPatterns) {
+          const match = excerpt.match(pattern);
+          if (match && match[1] && match[1].trim().length > 3) {
+            altText = match[1].trim();
+            break;
+          }
+        }
+        
+        // Se não encontrou alt, tentar extrair do contexto próximo (className, texto adjacente)
+        if (!altText) {
+          // Procurar por texto descritivo próximo ao placeholder
+          const contextPatterns = [
+            /(?:title|heading|name|description)\s*[=:]\s*[`'"]([^`'"]{10,100})[`'"]/i,
+            /className\s*=\s*[`'"][^`'"]*(?:hero|banner|feature|product|team|about)([^`'"]*)[`'"]/i,
+          ];
+          
+          for (const pattern of contextPatterns) {
+            const match = excerpt.match(pattern);
+            if (match && match[1] && match[1].trim().length > 5) {
+              altText = `Image for ${match[1].trim()}`;
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("[img-scan] failed to extract alt text:", e);
+      }
       
       allPlaceholders.push({
         filePath: path,
@@ -727,11 +760,40 @@ async function detectAndReplacePlaceholdersInFiles(files: Record<string, string>
       const { filePath, placeholder, uuid, altText, globalIndex } = placeholderInfo;
       
       console.log(`[img-scan] processing placeholder ${globalIndex + 1}/${allPlaceholders.length}:`, placeholder, "in", filePath);
+      if (altText) {
+        console.log(`[img-scan] found alt text for ${placeholder}:`, altText);
+      }
       
-      const promptEnglish = `Generate a high-quality, photorealistic image to replace the placeholder ${placeholder}.` +
-        ` Context file: ${filePath}.` +
-        (altText ? ` Use this image description as the prompt: "${altText}".` : ` Provide a natural, relevant image consistent with a modern landing page.`) +
-        ` Output as an image. Use English.`;
+      // Criar prompt específico baseado no alt text
+      let promptEnglish: string;
+      if (altText && altText.length > 5) {
+        // Usar o alt text como prompt principal
+        promptEnglish = `Generate a high-quality, photorealistic image based on this description: "${altText}". ` +
+          `Make it professional, modern, and suitable for a landing page. ` +
+          `For people/portraits: show only ONE person with a clear, professional appearance. ` +
+          `For products: show the item clearly with good lighting and composition. ` +
+          `For concepts/abstract: create a clean, modern visual representation. ` +
+          `Output as an image. Use English.`;
+      } else {
+        // Fallback para prompt genérico baseado no contexto do arquivo
+        const fileContext = filePath.toLowerCase();
+        let contextHint = "modern landing page";
+        
+        if (fileContext.includes("hero")) contextHint = "hero section with professional imagery";
+        else if (fileContext.includes("about")) contextHint = "about section with team or company imagery";
+        else if (fileContext.includes("product")) contextHint = "product showcase with clean presentation";
+        else if (fileContext.includes("team")) contextHint = "professional team member or group photo";
+        else if (fileContext.includes("testimonial")) contextHint = "customer testimonial with professional headshot";
+        else if (fileContext.includes("feature")) contextHint = "feature illustration or icon";
+        else if (fileContext.includes("service")) contextHint = "service-related professional imagery";
+        
+        promptEnglish = `Generate a high-quality, photorealistic image for a ${contextHint}. ` +
+          `Make it professional, modern, and visually appealing. ` +
+          `For people: show only ONE person with clear, professional appearance. ` +
+          `Context file: ${filePath}. Output as an image. Use English.`;
+      }
+      
+      console.log(`[img-gen] prompt:`, promptEnglish);
       
       try {
         const { buffer, ext, mimeType } = await generateImageWithNanoBanana(promptEnglish);

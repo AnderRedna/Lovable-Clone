@@ -112,6 +112,14 @@ Shadcn UI dependencies — including radix-ui, lucide-react, class-variance-auth
 
 Additional Guidelines:
 - Video embeds: do NOT use \'react-player\' or \'react-player/lazy\'. If you need video, prefer a native <video> tag with a local/public asset or an iframe (e.g., YouTube/Vimeo) with appropriate attributes. This avoids module-not-found errors when the dependency isn\'t installed.
+- Carousel/Slider Components: 
+  * NEVER use react-slick library or its props (showArrows, slidesToShow, slidesToScroll, etc.)
+  * NEVER use props like showArrows, slidesToShow, slidesToScroll, autoplay, dots, infinite, speed, etc. - these are react-slick specific and will cause errors
+  * For carousel/slider functionality, use native CSS with Tailwind utilities (overflow-x-auto, flex, snap-x, snap-mandatory, etc.) or Shadcn UI components
+  * For testimonials, clients, or brand carousels, prefer a responsive grid layout with Tailwind CSS instead of slider libraries
+  * If carousel behavior is absolutely needed, use native scroll-snap CSS properties with Tailwind classes
+  * Example for testimonials: Use a responsive grid (grid-cols-1 md:grid-cols-2 lg:grid-cols-3) instead of a slider
+  * Example for client logos: Use a flex layout with flex-wrap and justify-center instead of a carousel
 - Every text needs to be in Brazilian Portuguese (pt-BR)
 - Think step-by-step before coding
 - You MUST use the createOrUpdateFiles tool to make all file changes
@@ -158,7 +166,27 @@ Additional Guidelines:
 - Progress & urgency: use shadcn/ui Progress for “limited spots” and a small Badge for remaining count; countdown with clear labels and legible digits
 - Shapes: prefer rounded-2xl for cards/inputs and use consistent radii
 - Accessibility: always include focus-visible styles and maintain adequate contrast
+- Carousel/Slider Implementation Guidelines:
+  * For testimonials sections: Use a responsive CSS Grid (grid-cols-1 md:grid-cols-2 lg:grid-cols-3) with gap-6 or gap-8
+  * For client/brand logos: Use flex flex-wrap justify-center items-center with gap-8 md:gap-12
+  * For image galleries: Use CSS Grid with auto-fit and minmax for responsive columns
+  * If horizontal scrolling is needed: Use flex with overflow-x-auto, scroll-snap-x-mandatory, and scroll-snap-align-start
+  * Never import or use external carousel libraries (react-slick, swiper, etc.)
+  * Example testimonial layout: <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+  * Example client logos: <div className="flex flex-wrap justify-center items-center gap-8 md:gap-12">
 - Images: For images in your code, ALWAYS use unique placeholder format that will be automatically replaced by AI-generated images. Format: \`[image-to-replace-{uuid}]\` where {uuid} is a unique identifier. Example: \`[image-to-replace-a1b2c3d4-e5f6-7890-abcd-ef1234567890]\`. Each image must have a completely unique UUID to ensure proper replacement. These placeholders will be automatically detected and replaced with Gemini-generated images uploaded to AWS S3. NEVER use external image sources like Unsplash or any other stock photo services. Important: Never reuse UUIDs - each image placeholder must be completely unique.
+  * CRITICAL: Every image MUST have a detailed, specific alt attribute that describes exactly what the image should show. The alt text will be used as the primary prompt for AI image generation.
+  * Alt text guidelines:
+    - Be specific and descriptive (minimum 10 words, maximum 200 characters)
+    - For people: describe appearance, setting, and mood (e.g., "Professional businesswoman in modern office, smiling confidently at camera, wearing navy blazer")
+    - For products: describe the item, angle, lighting, and context (e.g., "Sleek wireless headphones on white background, side view with soft studio lighting")
+    - For concepts: describe the visual metaphor or scene (e.g., "Digital transformation concept with glowing network connections over city skyline at sunset")
+    - For UI elements: describe the interface or interaction (e.g., "Clean dashboard interface showing analytics charts and graphs on laptop screen")
+  * Examples of good alt text:
+    - alt="Modern coworking space with diverse team collaborating around glass table, natural lighting from large windows"
+    - alt="Premium smartphone displaying colorful app interface, held in hand against minimalist background"
+    - alt="Confident CEO presenting to board room, professional attire, engaging gesture, corporate setting"
+  * Bad alt text examples to avoid: "image", "photo", "picture", "placeholder", generic descriptions
 - Every screen should include a complete, realistic layout structure (navbar, sidebar, footer, content, etc.) — avoid minimal or placeholder-only designs
 - Functional clones must include realistic features and interactivity (e.g. drag-and-drop, add/edit/delete, toggle states, localStorage if helpful)
 - Prefer minimal, working features over static or hardcoded content
