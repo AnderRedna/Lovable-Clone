@@ -863,73 +863,169 @@ export const codeAgentFunction = inngest.createFunction(
     if (!isError && customization?.analytics && customization?.analytics?.provider !== "none") {
       await step.run("inject-analytics", async () => {
         try {
-          const raw = (customization?.analytics?.code || "").trim();
-          if (!raw) return;
-          // Strip <script> wrapper if present
-          const m = raw.match(/<script[^>]*>([\s\S]*?)<\/script>/i);
-          const code = (m ? m[1] : raw).trim();
+          console.log("Running inject-analytics");
+          const rawSnippet = (customization?.analytics?.code || "").trim();
+          if (!rawSnippet) return;
+
+          // Parse one or more <script> tags; if none, treat as inline JS
+          const scriptMatches = Array.from(rawSnippet.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi));
+          const scripts = scriptMatches.length
+            ? scriptMatches.map((mm) => ({ attrs: (mm[1] || "").trim(), content: (mm[2] || "").trim() }))
+            : [{ attrs: "", content: rawSnippet }];
+
+          const makePropsFromAttrs = (attrs: string) => {
+            const idMatch = attrs.match(/\bid=["']([^"']+)["']/i);
+            const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
+            const hasAsync = /\basync\b/i.test(attrs);
+            const hasDefer = /\bdefer\b/i.test(attrs);
+            const dataMatches = Array.from(attrs.matchAll(/\b(data-[\w-]+)=["']([^"']+)["']/gi));
+            let props = `strategy="afterInteractive"`;
+            if (idMatch?.[1]) props += ` id="${idMatch[1]}"`;
+            if (srcMatch?.[1]) props += ` src="${srcMatch[1]}"`;
+            if (hasAsync) props += ` async`;
+            if (hasDefer) props += ` defer`;
+            for (const m of dataMatches) {
+              const k = m[1];
+              const v = m[2];
+              props += ` ${k}="${v}"`;
+            }
+            return { props, hasSrc: !!srcMatch?.[1] };
+          };
 
           const files = result.state.data.files || {};
-          const candidates = Object.keys(files);
-          const layoutPath = candidates.find((p) => /app\/layout\.(tsx|jsx|ts|js)$/i.test(p));
           const sandbox = await getSandbox(sandboxId);
 
-          if (layoutPath) {
-            // 1) Write app/analytics.tsx component
-            const analyticsPath = "app/analytics.tsx";
-            const analyticsContent = `"use client";\nimport Script from 'next/script';\nexport default function AppAnalytics() {\n  return (\n    <>\n      <Script id=\"custom-analytics\" strategy=\"afterInteractive\" dangerouslySetInnerHTML={{ __html: \`${code.replace(/`/g, "\\`")}\` }} />\n    </>\n  );\n}\n`;
+          // Try to find layout both in memory and in sandbox
+          const inMemory = Object.keys(files).find((p) => /^(src\/)?app\/layout\.(tsx|jsx|ts|js)$/i.test(p));
+          const candidates = [
+            "src/app/layout.tsx","src/app/layout.jsx","src/app/layout.ts","src/app/layout.js",
+            "app/layout.tsx","app/layout.jsx","app/layout.ts","app/layout.js",
+          ];
+          let layoutPath = inMemory;
+          let layoutRaw = layoutPath ? String(files[layoutPath] || "") : "";
+          if (!layoutPath || !layoutRaw) {
+            for (const p of candidates) {
+              try {
+                const r = await sandbox.files.read(p);
+                if (r && typeof r === "string") { layoutPath = p; layoutRaw = r; break; }
+              } catch {}
+            }
+          }
+
+          if (layoutPath && layoutRaw) {
+            // 1) Write analytics component alongside layout (supports src/ and non-src projects)
+            const hasSrc = /^src\//i.test(layoutPath);
+            const analyticsPath = hasSrc ? "src/app/analytics.tsx" : "app/analytics.tsx";
+            // Build one <Script> per parsed <script> tag
+            const lines = scripts
+              .map((s, idx) => {
+                const { props, hasSrc } = makePropsFromAttrs(s.attrs);
+                if (hasSrc) {
+                  return `      <Script ${props} />`;
+                }
+                const escaped = s.content
+                  .replace(/`/g, "\\`")
+                  .replace(/\$\{/g, "\\${");
+                const needsId = !/\bid=/.test(props);
+                const idProp = needsId ? ` id={\"custom-analytics-${idx}\"}` : "";
+                return `      <Script ${props}${idProp} dangerouslySetInnerHTML={{ __html: \`${escaped}\` }} />`;
+              })
+              .join("\n");
+            const analyticsContent = `"use client";\nimport Script from 'next/script';\nexport default function AppAnalytics() {\n  return (\n    <>\n${lines}\n    </>\n  );\n}\n`;
             await sandbox.files.write(analyticsPath, analyticsContent);
             result.state.data.files[analyticsPath] = analyticsContent;
 
             // 2) Inject import and <AppAnalytics /> into layout
-            const layoutRaw = files[layoutPath] as string;
-            const hasImport = /from\s+['"]@\/app\/analytics['"]/m.test(layoutRaw) || /from\s+['"]\.\/analytics['"]/m.test(layoutRaw);
             let nextLayout = layoutRaw;
+            const hasImport = /from\s+['"]\.\/analytics['"]/m.test(nextLayout);
             if (!hasImport) {
-              // Insert import after first import or at top
               if (/^import\s/m.test(nextLayout)) {
-                nextLayout = nextLayout.replace(/^(import[\s\S]*?;\s*)/m, `$1\nimport AppAnalytics from '@/app/analytics';\n`);
+                nextLayout = nextLayout.replace(/^(import[\s\S]*?;\s*)/m, `$1\nimport AppAnalytics from './analytics';\n`);
               } else {
-                nextLayout = `import AppAnalytics from '@/app/analytics';\n` + nextLayout;
+                nextLayout = `import AppAnalytics from './analytics';\n` + nextLayout;
               }
             }
             if (!/\<AppAnalytics\s*\/>/m.test(nextLayout)) {
-              // Try to drop right after opening <body ...>
               const bodyIdx = nextLayout.search(/<body[^>]*>/i);
               if (bodyIdx !== -1) {
                 const insertPos = nextLayout.indexOf('>', bodyIdx) + 1;
                 nextLayout = nextLayout.slice(0, insertPos) + `\n      <AppAnalytics />` + nextLayout.slice(insertPos);
               } else {
-                // Fallback: before {children}
                 nextLayout = nextLayout.replace(/(\{\s*children\s*\})/m, `<AppAnalytics />\n      $1`);
               }
             }
             await sandbox.files.write(layoutPath, nextLayout);
             result.state.data.files[layoutPath] = nextLayout;
+            console.log("Completed inject-analytics via layout");
             return;
           }
 
-          // Fallbacks: try raw head injection or create app/head.tsx
+          // Fallbacks: try raw head injection or create app/head.tsx based on in-memory files
+          const buildRawScriptTag = (attrs: string, content: string) => {
+            const idMatch = attrs.match(/\bid=["']([^"']+)["']/i);
+            const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
+            const hasAsync = /\basync\b/i.test(attrs);
+            const hasDefer = /\bdefer\b/i.test(attrs);
+            const dataMatches = Array.from(attrs.matchAll(/\b(data-[\w-]+)=["']([^"']+)["']/gi));
+            let attrStr = "";
+            if (idMatch?.[1]) attrStr += ` id=\"${idMatch[1]}\"`;
+            if (srcMatch?.[1]) attrStr += ` src=\"${srcMatch[1]}\"`;
+            if (hasAsync) attrStr += ` async`;
+            if (hasDefer) attrStr += ` defer`;
+            for (const m of dataMatches) {
+              const k = m[1];
+              const v = m[2];
+              attrStr += ` ${k}=\"${v}\"`;
+            }
+            if (srcMatch?.[1]) {
+              return `<script${attrStr}></script>`;
+            }
+            // Escape closing script tags if present in content to avoid early termination
+            const safeContent = content.replace(/<\/script>/gi, "<\\/script>");
+            return `<script${attrStr}>\n${safeContent}\n</script>`;
+          };
+
+          const headScriptsHtml = scripts.map((s) => buildRawScriptTag(s.attrs, s.content)).join("\n");
+
           let targetPath: string | undefined;
           let updatedContent: string | undefined;
-          for (const p of candidates) {
-            const content = files[p] as string;
-            if (content.includes("</head>")) {
-              updatedContent = content.replace(/<\/head>/i, `\n  {/* Analytics */}\n  <script>\n${code}\n  </script>\n</head>`);
+          for (const [p, content] of Object.entries(files)) {
+            const c = String(content || "");
+            if (c.includes("</head>")) {
+              updatedContent = c.replace(/<\/head>/i, `\n  {/* Analytics */}\n${headScriptsHtml}\n</head>`);
               targetPath = p;
               break;
             }
           }
           if (!updatedContent) {
             targetPath = "app/head.tsx";
-            updatedContent = `export default function Head() {\n  return (\n    <>\n      {/* Analytics */}\n      <script>\n${code}\n      </script>\n    </>\n  );\n}\n`;
+            const joined = headScriptsHtml;
+            updatedContent = `export default function Head() {\n  return (\n    <>\n      {/* Analytics */}\n      <>${joined}</>\n    </>\n  );\n}\n`;
           }
           if (targetPath && updatedContent) {
             await sandbox.files.write(targetPath, updatedContent);
             result.state.data.files[targetPath] = updatedContent;
+            console.log("Completed inject-analytics via head fallback");
           }
         } catch (err) {
           console.warn("Analytics injection failed", err);
+        }
+      });
+    }
+
+    // Cleanup: remove orphan ClarityAnalytics component files if present
+    if (!isError) {
+      await step.run("cleanup-orphan-analytics", async () => {
+        try {
+          const sandbox = await getSandbox(sandboxId);
+          try {
+            await sandbox.commands.run("bash -lc \"rm -f app/ClarityAnalytics.tsx src/app/ClarityAnalytics.tsx\"");
+          } catch {}
+          const files = (result.state.data.files || {}) as Record<string, string>;
+          delete files["app/ClarityAnalytics.tsx"];
+          delete files["src/app/ClarityAnalytics.tsx"];
+        } catch (e) {
+          console.warn("cleanup-orphan-analytics failed", e);
         }
       });
     }
