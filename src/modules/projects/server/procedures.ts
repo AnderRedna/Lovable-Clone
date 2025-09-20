@@ -17,7 +17,6 @@ export const projectsRouter = createTRPCRouter({
       })
     )
     .query(async ({ input, ctx }) => {
-      console.log("Starting projects.getOne", input);
       const existingProject = await prisma.project.findUnique({
         where: {
           id: input.id,
@@ -31,11 +30,9 @@ export const projectsRouter = createTRPCRouter({
           message: "Project not found",
         });
       }
-      console.log("Completed projects.getOne", existingProject.id);
       return existingProject;
     }),
   getMany: protectedProcedure.query(async ({ ctx }) => {
-    console.log("Starting projects.getMany");
     const projects = await prisma.project.findMany({
       where: {
         userId: ctx.auth.userId,
@@ -44,7 +41,6 @@ export const projectsRouter = createTRPCRouter({
         updatedAt: "desc",
       },
     });
-    console.log("Completed projects.getMany", projects.length, "projects");
     return projects;
   }),
   create: protectedProcedure
@@ -84,12 +80,9 @@ export const projectsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      console.log("Starting projects.create", JSON.stringify(input));
       try {
         if (process.env.DISABLE_CREDIT_CHECK !== 'true') {
           await consumeCredits();
-        } else {
-          console.log("Credit check disabled, skipping consumeCredits");
         }
       } catch (error) {
         if (error instanceof Error) {
@@ -108,7 +101,7 @@ export const projectsRouter = createTRPCRouter({
       const createdProject = await prisma.project.create({
         data: {
           userId: ctx.auth.userId,
-          name: generateSlug(2, { format: "kebab" }),
+          name: generateSlug(2, { format: "kebab" }), // Temporary random name, will be updated when fragment is generated
           messages: {
             create: {
               content: input.value,
@@ -127,8 +120,6 @@ export const projectsRouter = createTRPCRouter({
           customization: input.customization,
         },
       });
-  console.log("Inngest event sent (projects.create)", sendResult);
-  console.log("Completed projects.create", createdProject.id);
       return createdProject;
     }),
 });

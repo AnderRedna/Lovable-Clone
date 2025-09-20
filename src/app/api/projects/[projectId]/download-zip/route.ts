@@ -29,7 +29,8 @@ export async function GET(
     const zip = new JSZip();
 
     // Hardcoded project title/description as requested
-    const projectTitle = "LandingPage";
+    // Use the title from the first fragment if available, otherwise use a default
+    const projectTitle = fragments[0]?.title || "Landing Page";
     const projectDescription = "Landing Page criada no Landinfy.com";
 
     // Collect all generated files content to detect dependencies

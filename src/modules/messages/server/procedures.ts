@@ -14,7 +14,6 @@ export const messagesRouter = createTRPCRouter({
       })
     )
     .query(async ({ input, ctx }) => {
-      console.log("Starting messages.getMany", input);
       const messages = await prisma.message.findMany({
         where: {
           projectId: input.projectId,
@@ -29,7 +28,6 @@ export const messagesRouter = createTRPCRouter({
           fragment: true,
         },
       });
-      console.log("Completed messages.getMany", messages.length, "messages");
       return messages;
     }),
   create: protectedProcedure
@@ -40,7 +38,6 @@ export const messagesRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      console.log("Starting messages.create", input);
       const existingProject = await prisma.project.findUnique({
         where: {
           id: input.projectId,
@@ -58,8 +55,6 @@ export const messagesRouter = createTRPCRouter({
       try {
         if (process.env.DISABLE_CREDIT_CHECK !== 'true') {
           await consumeCredits();
-        } else {
-          console.log("Credit check disabled, skipping consumeCredits");
         }
       } catch (error) {
         if (error instanceof Error) {
@@ -101,8 +96,6 @@ export const messagesRouter = createTRPCRouter({
           projectId: existingProject.id,
         },
       });
-  console.log("Inngest event sent (messages.create)", sendResult);
-  console.log("Completed messages.create", createdMessage.id);
       return createdMessage;
     }),
 });
