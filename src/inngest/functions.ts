@@ -114,7 +114,6 @@ async function ensureMetadataStep(step: any, result: any, sandboxId: string, tit
   });
 }
 
-// Heurística: evitar overwrite destrutivo em app/page.*
 function shouldBlockDestructivePageWrite(prev: string, next: string): boolean {
   if (!prev) return false;
   const ratio = next.length / Math.max(prev.length, 1);
@@ -137,153 +136,6 @@ function shouldBlockDestructivePageWrite(prev: string, next: string): boolean {
   return false;
 }
 
-function ensureImportLine(src: string, importLine: string): string {
-  if (!importLine?.trim()) return src;
-  if (src.includes(importLine.trim())) return src;
-  const lines = src.split("\n");
-  let insertIdx = 0;
-  if (/^\s*['"]use client['"]\s*;?/.test(lines[0] || "")) insertIdx = 1;
-  for (let i = insertIdx; i < lines.length; i++) {
-    if (/^\s*import\s+/.test(lines[i])) insertIdx = i + 1;
-    else if (lines[i].trim() && !/^\s*(\/\*|\/\/)/.test(lines[i])) break;
-  }
-  lines.splice(insertIdx, 0, importLine.trim());
-  return lines.join("\n");
-}
-
-function insertJsxIntoMain(src: string, jsx: string, position: "prepend" | "append" = "prepend"): string {
-  const openIdx = src.search(/<main\b[^>]*>/i);
-  const closeIdx = src.search(/<\/main>/i);
-  if (openIdx !== -1 && closeIdx !== -1 && closeIdx > openIdx) {
-    const afterOpen = src.indexOf(">", openIdx) + 1;
-    if (position === "prepend") {
-      return src.slice(0, afterOpen) + `\n      ${jsx}\n` + src.slice(afterOpen);
-    } else {
-      return src.slice(0, closeIdx) + `\n      ${jsx}\n` + src.slice(closeIdx);
-    }
-  }
-  const retIdx = src.indexOf("return");
-  if (retIdx !== -1) {
-    const paren = src.indexOf("(", retIdx);
-    if (paren !== -1) {
-      return src.slice(0, paren + 1) + `\n    ${jsx}\n` + src.slice(paren + 1);
-    }
-  }
-  return src + `\n${jsx}\n`;
-}
-
-// Guard leve: evitar remoção acidental de seções críticas em app/page.* durante EDIÇÃO
-function violatesCriticalSections(prev: string, next: string): string | null {
-  const hadMain = /<main\b/i.test(prev);
-  const hasMain = /<main\b/i.test(next);
-  if (hadMain && !hasMain) return "main tag removed";
-  const hadHeader = /<\s*(Navbar|header)\b/i.test(prev);
-  const hasHeader = /<\s*(Navbar|header)\b/i.test(next);
-  if (hadHeader && !hasHeader) return "header/navbar removed";
-  const hadFooter = /<\s*(Footer|footer)\b/i.test(prev);
-  const hasFooter = /<\s*(Footer|footer)\b/i.test(next);
-  if (hadFooter && !hasFooter) return "footer removed";
-  return null;
-}
-
-// Extrai nomes importados (default, named e "as") de um arquivo para detectar conflitos
-function extractImportedNames(src: string): string[] {
-  const importNames = Array.from(src.matchAll(/import\s+([\s\S]*?)from\s+['"][^'"]+['"]/g))
-    .flatMap((m) => {
-      const spec = (m[1] || "").trim();
-      const names: string[] = [];
-      const named = spec.match(/\{([^}]+)\}/);
-      if (named) {
-        for (const n of named[1].split(",")) {
-          const parts = n.trim().split(/\s+as\s+/);
-          names.push((parts[1] || parts[0]).trim());
-        }
-      }
-      const def = spec.replace(named?.[0] || "", "").trim().replace(/^,/, "").trim();
-      if (def) names.push(def);
-      return names.filter(Boolean);
-    });
-  return importNames;
-}
-
-// Ensure imported alias does not collide with existing imports in prevSrc
-function ensureUniqueAlias(importLine: string, prevSrc: string, jsx: string): { importLine: string; jsx: string } {
-  const candidates: string[] = [];
-  const def = importLine.match(/import\s+([A-Za-z_$][\w$]*)\s*(?:,|\s+from)/)?.[1];
-  if (def) candidates.push(def);
-  const namedGroup = importLine.match(/\{([^}]+)\}/);
-  if (namedGroup) {
-    for (const n of namedGroup[1].split(",")) {
-      const parts = n.trim().split(/\s+as\s+/);
-      const local = (parts[1] || parts[0]).trim();
-      if (local) candidates.push(local);
-    }
-  }
-  const alias = candidates[0];
-  if (!alias) return { importLine, jsx };
-
-  const used = new Set(extractImportedNames(prevSrc));
-  if (!used.has(alias)) return { importLine, jsx };
-
-  const special = /from\s+['"][^'"]*horizon-hero-section[^'"]*['"]/i.test(importLine) ? "HorizonHeroSection" : undefined;
-  const base = special || `${alias}New`;
-  let candidate = base;
-  let i = 2;
-  while (used.has(candidate)) candidate = `${base}${i++}`;
-
-  // Replace alias in importLine
-  let nextImport = importLine
-    // default import
-    .replace(new RegExp(`\bimport\s+${alias}\b`), `import ${candidate}`)
-    // named import with as
-    .replace(new RegExp(`\bas\s+${alias}\b`), `as ${candidate}`)
-    // named import without as (best-effort inside braces)
-    .replace(/(\{[^}]*\})/, (full) => full.replace(new RegExp(`(^|,)\s*${alias}(\s*,|$)`), (m: string) => m.replace(alias, candidate)));
-
-  const nextJsx = jsx.replace(new RegExp(`<\s*${alias}\b`, "g"), `<${candidate}`);
-  return { importLine: nextImport, jsx: nextJsx };
-}
-
-// Sanitize demo imports: replace @/components/ui/demo with real component paths
-function sanitizeDemoImport(importLine: string, jsx: string, files: Record<string, string>): { importLine: string; jsx: string } {
-  if (!/@\/components\/ui\/demo['"]?/i.test(importLine)) return { importLine, jsx };
-  const imported =
-    importLine.match(/\{\s*([A-Za-z_$][\w$]*)\s*(?:as\s*[A-Za-z_$][\w$]*)?\s*\}/)?.[1] ||
-    importLine.match(/import\s+([A-Za-z_$][\w$]*)\s+from/)
-      ?.[1] || "";
-  const baseName = imported?.replace(/Demo$/i, "") || "Section";
-  const appPath = `app/${baseName}.tsx`;
-  const uiPath = `components/ui/${baseName.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()}.tsx`;
-  let newSpecifier = `./${baseName}`;
-  if (!files[appPath] && files[uiPath]) {
-    newSpecifier = `@/components/ui/${uiPath.split("/").pop()!.replace(/\.tsx?$/i, "")}`;
-  }
-  let nextImport = importLine.replace(/@\/components\/ui\/demo/gi, newSpecifier);
-  if (imported) {
-    nextImport = nextImport.replace(new RegExp(`\\b${imported}\\b`, "g"), baseName);
-  }
-  const nextJsx = imported ? jsx.replace(new RegExp(`<\\s*${imported}\\b`, "g"), `<${baseName}`) : jsx;
-  return { importLine: nextImport, jsx: nextJsx };
-}
-
-// Rewrite imports from @/components/ui/<slug> to local app/<PascalCase> when that file exists
-function sanitizeUiImportToApp(importLine: string, files: Record<string, string>): string {
-  const m = importLine.match(/from\s+["']@\/components\/ui\/([^"']+)["']/i);
-  if (!m) return importLine;
-  const slug = m[1].split("/").pop() || "";
-  if (!slug) return importLine;
-  const baseName = slug.replace(/\.(tsx|ts|jsx|js)$/i, "").split(/[^A-Za-z0-9]+/).filter(Boolean).map((p: string) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
-  const appPathTsx = `app/${baseName}.tsx`;
-  const appPathTs = `app/${baseName}.ts`;
-  if (files[appPathTsx] || files[appPathTs]) {
-    return importLine.replace(/from\s+["']@\/components\/ui\/[^"']+["']/i, `from './${baseName}'`);
-  }
-  return importLine;
-}
-
-// Normalize content of files written under app/:
-// - Fix relative imports using kebab-case (./creative-pricing -> ./CreativePricing)
-// - Ensure Shadcn primitives import from @/components/ui/* (e.g., Button -> @/components/ui/button)
 function normalizeAppFileContent(filePath: string, content: string): string {
   if (!/^app\//i.test(filePath) || typeof content !== 'string') return content;
   let out = content;
@@ -564,14 +416,31 @@ export const codeAgentFunction = inngest.createFunction(
               if (!prev || DEFAULT_NEXT_TEMPLATE_RE.test(prev)) {
                 prev = `"use client";\n\nexport default function Page(){\n  return (<main className=\"min-h-screen w-full\"></main>);\n}\n`;
               }
-              // First, prefer local app/<PascalCase> if exists for any ui import
-              const importPreferred = sanitizeUiImportToApp(importLine, filesState as Record<string, string>);
-              const sanitized = sanitizeDemoImport(importPreferred, jsx, filesState as Record<string, string>);
-              const adjusted = ensureUniqueAlias(sanitized.importLine, prev, sanitized.jsx);
-              const fixedImport = adjusted.importLine;
-              const fixedJsx = adjusted.jsx;
-              let next = ensureImportLine(prev, fixedImport);
-              next = insertJsxIntoMain(next, fixedJsx, position);
+              // Simplified approach: just add import and jsx without complex processing
+              let next = prev;
+              if (importLine?.trim() && !prev.includes(importLine.trim())) {
+                const lines = prev.split("\n");
+                let insertIdx = 0;
+                if (/^\s*['"]use client['"]\s*;?/.test(lines[0] || "")) insertIdx = 1;
+                for (let i = insertIdx; i < lines.length; i++) {
+                  if (/^\s*import\s+/.test(lines[i])) insertIdx = i + 1;
+                  else if (lines[i].trim() && !/^\s*(\/\*|\/\/)/.test(lines[i])) break;
+                }
+                lines.splice(insertIdx, 0, importLine.trim());
+                next = lines.join("\n");
+              }
+              // Insert JSX into main tag or at the end
+              const mainMatch = next.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i);
+              if (mainMatch) {
+                const mainContent = mainMatch[1];
+                const newMainContent = position === "prepend" 
+                  ? `\n      ${jsx}\n${mainContent}` 
+                  : `${mainContent}\n      ${jsx}\n`;
+                next = next.replace(/<main\b[^>]*>[\s\S]*?<\/main>/i, 
+                  mainMatch[0].replace(mainContent, newMainContent));
+              } else {
+                next = next + `\n${jsx}\n`;
+              }
               await sandbox.files.write(path, next);
               network.state.data.files[path] = next;
               return `Updated ${path} with safe merge`;
@@ -1664,8 +1533,16 @@ export const codeAgentEditFunction = inngest.createFunction(
                       ? (updatedFiles[normalized] as string)
                       : await (async () => { try { return await sandbox.files.read(normalized); } catch { return ""; } })();
                     if (prev) {
-                      const v = violatesCriticalSections(prev, file.content);
-                      if (v) return `Blocked edit to ${normalized}: ${v}`;
+                      // Simple check for critical sections
+                      const hadMain = /<main\b/i.test(prev);
+                      const hasMain = /<main\b/i.test(file.content);
+                      if (hadMain && !hasMain) return `Blocked edit to ${normalized}: main tag removed`;
+                      const hadHeader = /<\s*(Navbar|header)\b/i.test(prev);
+                      const hasHeader = /<\s*(Navbar|header)\b/i.test(file.content);
+                      if (hadHeader && !hasHeader) return `Blocked edit to ${normalized}: header/navbar removed`;
+                      const hadFooter = /<\s*(Footer|footer)\b/i.test(prev);
+                      const hasFooter = /<\s*(Footer|footer)\b/i.test(file.content);
+                      if (hadFooter && !hasFooter) return `Blocked edit to ${normalized}: footer removed`;
                     }
                   }
                   const finalContent = normalizeAppFileContent(normalized, file.content);
@@ -1711,13 +1588,31 @@ export const codeAgentEditFunction = inngest.createFunction(
               if (!prev) {
                 prev = `"use client";\n\nexport default function Page(){\n  return (<main className=\"min-h-screen w-full\">{\"\"}</main>);\n}\n`;
               }
-              const importPreferred = sanitizeUiImportToApp(importLine, filesState);
-              const sanitized = sanitizeDemoImport(importPreferred, jsx, filesState);
-              const adjusted = ensureUniqueAlias(sanitized.importLine, prev, sanitized.jsx);
-              const fixedImport = adjusted.importLine;
-              const fixedJsx = adjusted.jsx;
-              let next = ensureImportLine(prev, fixedImport);
-              next = insertJsxIntoMain(next, fixedJsx, position);
+              // Simplified approach for safe page update
+              let next = prev;
+              if (importLine?.trim() && !prev.includes(importLine.trim())) {
+                const lines = prev.split("\n");
+                let insertIdx = 0;
+                if (/^\s*['"]use client['"]\s*;?/.test(lines[0] || "")) insertIdx = 1;
+                for (let i = insertIdx; i < lines.length; i++) {
+                  if (/^\s*import\s+/.test(lines[i])) insertIdx = i + 1;
+                  else if (lines[i].trim() && !/^\s*(\/\*|\/\/)/.test(lines[i])) break;
+                }
+                lines.splice(insertIdx, 0, importLine.trim());
+                next = lines.join("\n");
+              }
+              // Insert JSX into main tag
+              const mainMatch = next.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i);
+              if (mainMatch) {
+                const mainContent = mainMatch[1];
+                const newMainContent = position === "prepend" 
+                  ? `\n      ${jsx}\n${mainContent}` 
+                  : `${mainContent}\n      ${jsx}\n`;
+                next = next.replace(/<main\b[^>]*>[\s\S]*?<\/main>/i, 
+                  mainMatch[0].replace(mainContent, newMainContent));
+              } else {
+                next = next + `\n${jsx}\n`;
+              }
               await sandbox.files.write(path, next);
               network.state.data.files[path] = next;
               return `Updated ${path} with safe merge`;
