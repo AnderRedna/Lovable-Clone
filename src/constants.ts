@@ -6,19 +6,19 @@ export const PROJECT_TEMPLATES = [
       "Create a SaaS landing page with a hero section featuring a compelling headline, call-to-action button, feature highlights, testimonials, and a footer. Use modern design with gradients, icons, and responsive layout.",
   },
   {
-    emoji: "�",
+    emoji: "📈",
     title: "Para marketing",
     prompt:
       "Design a marketing landing page with a hero banner, benefit sections, social proof, email signup form, and a clean footer. Focus on persuasive copy, high-contrast colors, and mobile optimization.",
   },
   {
-    emoji: "�",
+    emoji: "🚪",
     title: "Para fake door",
     prompt:
       "Build a fake door landing page with a teaser headline, countdown timer, email capture form, and social media links. Use urgency elements like limited spots and a sleek, minimalist design.",
   },
   {
-    emoji: "�",
+    emoji: "🏢",
     title: "Para empresarial",
     prompt:
       "Create a business landing page with sections for services, about us, client logos, contact form, and a navigation bar. Emphasize professionalism with balanced spacing, typography, and call-to-action placements.",
@@ -47,8 +47,14 @@ export const PROJECT_TEMPLATES = [
     prompt:
       "Create a waitlist landing page with an email sign-up form, benefits of early access, social proof from influencers or beta users, and a launch countdown. Use compelling visuals, urgency elements, and persuasive copy to drive sign-ups.",
   },
+  {
+    emoji: "🧪",
+    title: "Teste",
+    prompt:
+      "Apenas um hero com um botão",
+  },
 ] as const;
 
 export const MAX_SEGMENTS = 4;
 
-export const SANDBOX_TIMEOUT_IN_MS = 60_000 * 10 * 3; // 30 mins
+export const SANDBOX_TIMEOUT_IN_MS = 60_000 * 10 * 2;
