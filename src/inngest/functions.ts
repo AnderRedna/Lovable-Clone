@@ -114,22 +114,6 @@ async function ensureMetadataStep(step: any, result: any, sandboxId: string, tit
   });
 }
 
-function toPascalCase(name: string): string {
-  return name
-    .replace(/\.(tsx|ts|jsx|js)$/i, "")
-    .split(/[^A-Za-z0-9]+/)
-    .filter(Boolean)
-    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
-    .join("");
-}
-
-function toKebabCase(name: string): string {
-  return name
-    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
-    .replace(/\s+/g, '-')
-    .toLowerCase();
-}
-
 // Check if a path is allowed, supporting folder wildcards like components/ui/*
 function isPathAllowed(p: string, guard: Set<string>): boolean {
   if (guard.size === 0) return true;
@@ -154,13 +138,13 @@ function mapComponentPath(p: string): string {
   if (appFile) {
     const base = appFile[1];
     if (/-/.test(base) && !/^page$/i.test(base)) {
-      return `app/${toPascalCase(base)}.${appFile[2]}`;
+      return `app/${base.replace(/\.(tsx|ts|jsx|js)$/i, "").split(/[^A-Za-z0-9]+/).filter(Boolean).map((p: string) => p.charAt(0).toUpperCase() + p.slice(1)).join("")}.${appFile[2]}`;
     }
   }
   // components/blocks/* -> app/<PascalCase>.tsx
   if (/^components\/blocks\//i.test(out)) {
     const base = out.split("/").pop() || "Component.tsx";
-    const pascal = toPascalCase(base);
+    const pascal = base.replace(/\.(tsx|ts|jsx|js)$/i, "").split(/[^A-Za-z0-9]+/).filter(Boolean).map((p: string) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
     return `app/${pascal}.tsx`;
   }
   // If looks like a page section under components/ui, move to app/<PascalCase>.tsx
@@ -168,7 +152,7 @@ function mapComponentPath(p: string): string {
   if (m) {
     const name = m[1];
     if (/(hero|pricing|feature|testimonial|footer|header|section|banner|clients?|logos?|gallery|video|background|signup|email|cta)/i.test(name)) {
-      return `app/${toPascalCase(name)}.tsx`;
+      return `app/${name.replace(/\.(tsx|ts|jsx|js)$/i, "").split(/[^A-Za-z0-9]+/).filter(Boolean).map((p: string) => p.charAt(0).toUpperCase() + p.slice(1)).join("")}.tsx`;
     }
   }
   return out;
@@ -332,7 +316,7 @@ function sanitizeUiImportToApp(importLine: string, files: Record<string, string>
   if (!m) return importLine;
   const slug = m[1].split("/").pop() || "";
   if (!slug) return importLine;
-  const baseName = toPascalCase(slug);
+  const baseName = slug.replace(/\.(tsx|ts|jsx|js)$/i, "").split(/[^A-Za-z0-9]+/).filter(Boolean).map((p: string) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
   const appPathTsx = `app/${baseName}.tsx`;
   const appPathTs = `app/${baseName}.ts`;
   if (files[appPathTsx] || files[appPathTs]) {
@@ -350,7 +334,7 @@ function normalizeAppFileContent(filePath: string, content: string): string {
 
   // 1) Fix relative kebab-case imports to PascalCase
   out = out.replace(/from\s+(["'])\.\/(?!\.)([a-z0-9\-]+)(?:\.(?:tsx|ts|jsx|js))?\1/g, (m, quote, slug) => {
-    const pascal = toPascalCase(slug);
+    const pascal = slug.replace(/\.(tsx|ts|jsx|js)$/i, "").split(/[^A-Za-z0-9]+/).filter(Boolean).map((p: string) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
     return m.replace(new RegExp(`\.\/${slug}`), `./${pascal}`);
   });
 
@@ -383,7 +367,7 @@ function normalizeAppFileContent(filePath: string, content: string): string {
 
     const found = names.find((n) => primitiveMap[n]);
     if (!found) return full;
-    const kebab = primitiveMap[found] || toKebabCase(found);
+    const kebab = primitiveMap[found] || found.replace(/([a-z0-9])([A-Z])/g, '$1-$2').replace(/\s+/g, '-').toLowerCase();
     return `import ${spec} from ${q}@/components/ui/${kebab}${q};`;
   });
 
