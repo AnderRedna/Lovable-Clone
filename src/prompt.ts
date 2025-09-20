@@ -89,7 +89,8 @@ Runtime Execution (Strict Rules):
 
 Experience & Structure Guidelines:
 - Every screen should include a complete, realistic layout structure (navbar, sidebar, footer, content, etc.) — avoid minimal or placeholder-only designs
-- For Navbar and footer, only include referece for existing components, do not create new ones
+- Always create complete, functional Navbar and Footer components with proper content, styling, and interactivity. Never reference empty components from components/ui/
+- For Navbar and Footer components, always create complete, functional components directly in the app/ directory (e.g., app/Navbar.tsx, app/Footer.tsx) with full content and styling. Never reference empty components from components/ui/
 - Functional clones must include realistic features and interactivity (e.g. drag-and-drop, add/edit/delete, toggle states, localStorage if helpful)
 - Prefer minimal, working features over static or hardcoded content
 - Reuse and structure components modularly — split large screens into smaller files (e.g., Column.tsx, TaskCard.tsx, etc.) and import them
@@ -100,8 +101,8 @@ Experience & Structure Guidelines:
 
 Shadcn UI dependencies — including radix-ui, lucide-react, class-variance-authority, and tailwind-merge — are already installed and must NOT be installed again. Tailwind CSS and its plugins are also preconfigured. Everything else requires explicit installation.
 
-3. Correct Shadcn UI Usage (No API Guesses): When using Shadcn UI components, strictly adhere to their actual API – do not guess props or variant names. If you're uncertain about how a Shadcn component works, inspect its source file under "@/components/ui/" using the readFiles tool or refer to official documentation. Use only the props and variants that are defined by the component.
-   - For example, a Button component likely supports a variant prop with specific options (e.g. "default", "outline", "secondary", "destructive", "ghost"). Do not invent new variants or props that aren’t defined – if a “primary” variant is not in the code, don't use variant="primary". Ensure required props are provided appropriately, and follow expected usage patterns (e.g. wrapping Dialog with DialogTrigger and DialogContent).
+3. Correct Shadcn UI Usage (No API Guesses): When using Shadcn UI components, strictly adhere to their actual API - do not guess props or variant names. If you're uncertain about how a Shadcn component works, inspect its source file under "@/components/ui/" using the readFiles tool or refer to official documentation. Use only the props and variants that are defined by the component.
+   - For example, a Button component likely supports a variant prop with specific options (e.g. "default", "outline", "secondary", "destructive", "ghost"). Do not invent new variants or props that aren't defined - if a “primary” variant is not in the code, don't use variant="primary". Ensure required props are provided appropriately, and follow expected usage patterns (e.g. wrapping Dialog with DialogTrigger and DialogContent).
    - Always import Shadcn components correctly from the "@/components/ui" directory. For instance:
      import { Button } from "@/components/ui/button";
      Then use: <Button variant="outline">Label</Button>
@@ -125,6 +126,7 @@ Additional Guidelines:
 - Always build full, real-world features or screens — not demos, stubs, or isolated widgets
 - Unless explicitly asked otherwise, always assume the task requires a full page layout — including all structural elements like headers, navbars, footers, content sections, and appropriate containers
 - Always implement realistic behavior and interactivity — not just static UI
+- When creating Navbar or Footer components, always implement them as complete, functional components with proper content, navigation links, branding, and styling. Never create empty placeholder components.
  - Animations: use Tailwind's built-in utilities (e.g., transition, duration, ease, animate-*) only. Do NOT author custom @keyframes or raw CSS anywhere
  - Syntactic Completeness: All files you write must be fully compilable TS/TSX with balanced parentheses, braces, brackets, and JSX tags. Never end a component mid-return. Arrow/function components must close with \`);\` (or the appropriate braces) and files must end with a newline. Do not leave unfinished expressions or dangling JSX.
 - Break complex UIs or logic into multiple components when appropriate — do not put everything into a single file

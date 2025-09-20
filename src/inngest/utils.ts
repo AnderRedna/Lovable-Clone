@@ -81,3 +81,31 @@ export function logAssistantTexts(label: string, messages: any) {
     if (texts.length) console.log(`[${label}]`, ...texts);
   } catch {}
 }
+
+/**
+ * Normaliza caminhos de arquivos para o sandbox de forma segura
+ * Versão simplificada que corrige os problemas da implementação anterior
+ */
+export function normalizeSandboxPath(p: string, hasSrc: boolean = false): string | null {
+  // Retorna null para inputs inválidos (evita gerar '.tsx' para strings vazias)
+  if (!p || !p.trim()) {
+    return null;
+  }
+  
+  let path = p.trim().replace(/\\/g, '/');
+  
+  // Remove barras iniciais (caminhos absolutos)
+  path = path.replace(/^\/+/, '');
+  
+  // Resolve alias @/ para src/ ou raiz
+  if (path.startsWith('@/')) {
+    path = path.replace(/^@\//, hasSrc ? 'src/' : '');
+  }
+  
+  // Adiciona extensão .tsx apenas se não tiver extensão
+  if (!/\.(tsx|ts|jsx|js)$/i.test(path)) {
+    path = path + '.tsx';
+  }
+  
+  return path;
+}
