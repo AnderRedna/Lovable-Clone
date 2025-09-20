@@ -114,50 +114,6 @@ async function ensureMetadataStep(step: any, result: any, sandboxId: string, tit
   });
 }
 
-// Check if a path is allowed, supporting folder wildcards like components/ui/*
-function isPathAllowed(p: string, guard: Set<string>): boolean {
-  if (guard.size === 0) return true;
-  if (guard.has(p)) return true;
-  for (const g of guard) {
-    if (g.endsWith("/*")) {
-      const prefix = g.slice(0, -2);
-      if (p.startsWith(prefix)) return true;
-    }
-    if (g.endsWith("/")) {
-      if (p.startsWith(g)) return true;
-    }
-  }
-  return false;
-}
-
-// Normalize component paths: route page sections into app/ and fix common typos
-function mapComponentPath(p: string): string {
-  let out = p.replace(/princing/gi, "pricing");
-  // Normalize app/<kebab>.tsx -> app/<PascalCase>.tsx for sections
-  const appFile = out.match(/^app\/([^\/]+)\.(tsx|ts|jsx|js)$/i);
-  if (appFile) {
-    const base = appFile[1];
-    if (/-/.test(base) && !/^page$/i.test(base)) {
-      return `app/${base.replace(/\.(tsx|ts|jsx|js)$/i, "").split(/[^A-Za-z0-9]+/).filter(Boolean).map((p: string) => p.charAt(0).toUpperCase() + p.slice(1)).join("")}.${appFile[2]}`;
-    }
-  }
-  // components/blocks/* -> app/<PascalCase>.tsx
-  if (/^components\/blocks\//i.test(out)) {
-    const base = out.split("/").pop() || "Component.tsx";
-    const pascal = base.replace(/\.(tsx|ts|jsx|js)$/i, "").split(/[^A-Za-z0-9]+/).filter(Boolean).map((p: string) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
-    return `app/${pascal}.tsx`;
-  }
-  // If looks like a page section under components/ui, move to app/<PascalCase>.tsx
-  const m = out.match(/^components\/ui\/([^\/]+)\.(tsx|ts|jsx|js)$/i);
-  if (m) {
-    const name = m[1];
-    if (/(hero|pricing|feature|testimonial|footer|header|section|banner|clients?|logos?|gallery|video|background|signup|email|cta)/i.test(name)) {
-      return `app/${name.replace(/\.(tsx|ts|jsx|js)$/i, "").split(/[^A-Za-z0-9]+/).filter(Boolean).map((p: string) => p.charAt(0).toUpperCase() + p.slice(1)).join("")}.tsx`;
-    }
-  }
-  return out;
-}
-
 // Heurística: evitar overwrite destrutivo em app/page.*
 function shouldBlockDestructivePageWrite(prev: string, next: string): boolean {
   if (!prev) return false;
@@ -535,8 +491,13 @@ export const codeAgentFunction = inngest.createFunction(
                     console.warn(`🚫 Invalid path: ${file.path}`);
                     continue;
                   }
-                  normalized = mapComponentPath(normalized);
-                  if (!isPathAllowed(normalized, guard)) {
+                  
+                  const guard = new Set<string>((network.state.data.allowedPaths || []) as string[]);
+                  if (guard.size > 0 && !guard.has(normalized) && 
+                      !Array.from(guard).some(g => 
+                        (g.endsWith("/*") && normalized.startsWith(g.slice(0, -2))) ||
+                        (g.endsWith("/") && normalized.startsWith(g))
+                      )) {
                     console.warn(`🚫 Blocked write to ${normalized}`);
                     continue;
                   }
@@ -592,7 +553,11 @@ export const codeAgentFunction = inngest.createFunction(
               const path = normalizeSandboxPath(filePath, hasSrc);
               if (!path) return `Invalid path: ${filePath}`;
               const guard = new Set<string>((network.state.data.allowedPaths || []) as string[]);
-              if (!isPathAllowed(path, guard)) return `Blocked: ${path} not in allowedPaths.`;
+              if (guard.size > 0 && !guard.has(path) && 
+                  !Array.from(guard).some(g => 
+                    (g.endsWith("/*") && path.startsWith(g.slice(0, -2))) ||
+                    (g.endsWith("/") && path.startsWith(g))
+                  )) return `Blocked: ${path} not in allowedPaths.`;
               let prev = "";
               try { prev = await sandbox.files.read(path); } catch {}
               // If file missing or it's the default Next.js starter, start from a minimal shell
@@ -1680,8 +1645,12 @@ export const codeAgentEditFunction = inngest.createFunction(
                     console.warn(`🚫 Invalid path: ${file.path}`);
                     continue;
                   }
-                  normalized = mapComponentPath(normalized);
-                  if (!isPathAllowed(normalized, guard)) {
+                  
+                  if (guard.size > 0 && !guard.has(normalized) && 
+                      !Array.from(guard).some(g => 
+                        (g.endsWith("/*") && normalized.startsWith(g.slice(0, -2))) ||
+                        (g.endsWith("/") && normalized.startsWith(g))
+                      )) {
                     console.warn(`[edit-guard] blocked write to ${normalized}`);
                     continue;
                   }
@@ -1732,7 +1701,11 @@ export const codeAgentEditFunction = inngest.createFunction(
               const path = normalizeSandboxPath(filePath, hasSrc);
               if (!path) return `Invalid path: ${filePath}`;
               const guard = new Set<string>((network.state.data.allowedPaths || []) as string[]);
-              if (!isPathAllowed(path, guard)) return `Blocked: ${path} not in allowedPaths.`;
+              if (guard.size > 0 && !guard.has(path) && 
+                  !Array.from(guard).some(g => 
+                    (g.endsWith("/*") && path.startsWith(g.slice(0, -2))) ||
+                    (g.endsWith("/") && path.startsWith(g))
+                  )) return `Blocked: ${path} not in allowedPaths.`;
               let prev = "";
               try { prev = await sandbox.files.read(path); } catch {}
               if (!prev) {
