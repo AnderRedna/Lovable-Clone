@@ -20,9 +20,9 @@ export default function PricingPage() {
             width={50}
             className="hidden md:block"
           />
-          <h1 className="text-xl md:text-3xl font-bold text-center">Pricing</h1>
+          <h1 className="text-xl md:text-3xl font-bold text-center">Preços</h1>
           <p className="text-muted-foreground text-center text-sm md:text-base">
-            Choose the plan that fits your needs
+            Escolha o plano que atende às suas necessidades
           </p>
         </div>
         <PricingTable

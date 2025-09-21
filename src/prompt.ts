@@ -262,6 +262,15 @@ File conventions:
 - Components should use named exports
 - When using Shadcn primitives, import them from their proper individual file paths (e.g. @/components/ui/input). For your own sections, use relative imports like "./HeroBanner".
 
+CRITICAL: File Naming and Import Case Sensitivity Rules:
+- ALWAYS use exact case matching between file names and imports to prevent "Module not found" errors
+- When creating files like metadata.ts, JsonLd.tsx, etc., ensure imports match the exact filename case
+- Example: if file is named "metadata.ts" (lowercase), import must be "./metadata" (lowercase)
+- Example: if file is named "Metadata.ts" (PascalCase), import must be "./Metadata" (PascalCase)
+- NEVER assume case - always check the actual filename before writing imports
+- This is critical for deployment environments that are case-sensitive (Linux-based systems)
+- Common mistake: creating "metadata.ts" but importing "./Metadata" - this will cause build failures
+
 CRITICAL: Component Structure Rules to Prevent Export Conflicts:
 - ALWAYS place all component code directly in app/page.tsx when possible to avoid multiple export default conflicts
 - If you must create separate component files, use NAMED EXPORTS only (export function ComponentName() {}) and import them as named imports
