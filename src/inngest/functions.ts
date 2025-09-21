@@ -753,21 +753,49 @@ export const codeAgentFunction = inngest.createFunction(
           console.warn("postprocess: tailwind config ensure failed", e);
         }
 
-        // 2.5) Ensure next.config images allows picsum.photos
+        // 2.5) Ensure next.config images allows required domains
         try {
           const jsPath = "next.config.js";
           const mjsPath = "next.config.mjs";
           const jsRaw = await readSafe(jsPath);
           const mjsRaw = await readSafe(mjsPath);
 
+          const requiredDomains = ['picsum.photos', 'mariabot20util.s3.sa-east-1.amazonaws.com'];
+          
           if (!jsRaw && !mjsRaw) {
-            const cfg = `/** @type {import('next').NextConfig} */\nconst nextConfig = {\n  images: { domains: ['picsum.photos'] },\n};\nmodule.exports = nextConfig;\n`;
+            // Use modern remotePatterns for Next.js 12.3.0+
+            const cfg = `/** @type {import('next').NextConfig} */\nconst nextConfig = {\n  images: {\n    remotePatterns: [\n      {\n        protocol: 'https',\n        hostname: 'picsum.photos',\n      },\n      {\n        protocol: 'https',\n        hostname: 'mariabot20util.s3.sa-east-1.amazonaws.com',\n      },\n    ],\n  },\n};\nmodule.exports = nextConfig;\n`;
             await sandbox.files.write(jsPath, cfg);
             result.state.data.files[jsPath] = cfg;
-          } else if (jsRaw && !/picsum\.photos/.test(jsRaw)) {
-            const patched = `${jsRaw}\n// Ensure picsum.photos domain for next/image\nmodule.exports.images = module.exports.images || {};\nmodule.exports.images.domains = Array.from(new Set([...(module.exports.images.domains || []), 'picsum.photos']));\n`;
-            await sandbox.files.write(jsPath, patched);
-            result.state.data.files[jsPath] = patched;
+          } else if (jsRaw) {
+            let needsUpdate = false;
+            for (const domain of requiredDomains) {
+              if (!jsRaw.includes(domain)) {
+                needsUpdate = true;
+                break;
+              }
+            }
+            
+            if (needsUpdate) {
+              // Check if config uses remotePatterns or domains
+              if (jsRaw.includes('remotePatterns')) {
+                // Add to existing remotePatterns
+                let patched = jsRaw;
+                for (const domain of requiredDomains) {
+                  if (!patched.includes(domain)) {
+                    const newPattern = `      {\n        protocol: 'https',\n        hostname: '${domain}',\n      },`;
+                    patched = patched.replace(/remotePatterns:\s*\[/, `remotePatterns: [\n${newPattern}`);
+                  }
+                }
+                await sandbox.files.write(jsPath, patched);
+                result.state.data.files[jsPath] = patched;
+              } else {
+                // Fallback to domains for older Next.js versions
+                const patched = `${jsRaw}\n// Ensure required domains for next/image\nmodule.exports.images = module.exports.images || {};\nmodule.exports.images.domains = Array.from(new Set([...(module.exports.images.domains || []), ...${JSON.stringify(requiredDomains)}]));\n`;
+                await sandbox.files.write(jsPath, patched);
+                result.state.data.files[jsPath] = patched;
+              }
+            }
           }
         } catch (e) {
           console.warn("postprocess: ensure next.config images failed", e);

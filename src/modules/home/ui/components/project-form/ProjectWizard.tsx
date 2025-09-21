@@ -42,7 +42,7 @@ export function ProjectWizard({
   onFinish,
 }: Props) {
   const [choices, setChoices] = useState<StepChoices>(
-    initialChoices ?? { palette: true, monitoring: false, components: false }
+    initialChoices ?? { seoPremium: true, copyPremium: true, palette: true, monitoring: false, components: false }
   );
 
   const steps = useMemo(() => {

@@ -1,8 +1,10 @@
 "use client";
 
-import { Palette, BarChart3, Layers, Clock, Mail, CreditCard } from "lucide-react";
+import { Palette, BarChart3, Layers, Clock, Mail, CreditCard, Lock, Search, PenTool } from "lucide-react";
 
 type StepChoices = {
+  seoPremium: boolean;
+  copyPremium: boolean;
   palette: boolean;
   monitoring: boolean;
   components: boolean;
@@ -14,9 +16,11 @@ type Props = {
 };
 
 const options = [
-  { key: "palette", label: "Paleta de cores", description: "Defina a identidade de cores do projeto.", icon: Palette },
-  { key: "monitoring", label: "Monitoramento", description: "Configure métricas e observabilidade.", icon: BarChart3 },
-  { key: "components", label: "Componentes", description: "Escolha e configure componentes base.", icon: Layers },
+  { key: "seoPremium", label: "SEO Premium", description: "Otimização avançada para mecanismos de busca.", icon: Search, locked: true },
+  { key: "copyPremium", label: "Copy Premium", description: "Textos persuasivos com gatilhos de conversão.", icon: PenTool, locked: true },
+  { key: "palette", label: "Paleta de cores", description: "Defina a identidade de cores do projeto.", icon: Palette, locked: false },
+  { key: "monitoring", label: "Monitoramento", description: "Configure métricas e observabilidade.", icon: BarChart3, locked: false },
+  { key: "components", label: "Componentes", description: "Escolha e configure componentes base.", icon: Layers, locked: false },
 ] as const;
 
 const comingSoonOptions = [
@@ -30,6 +34,8 @@ const comingSoonOptions = [
 
 export function StepOptionSelector({ value, onChange }: Props) {
   const toggle = (key: keyof StepChoices) => {
+    // Não permite desmarcar SEO Premium e Copy Premium
+    if (key === "seoPremium" || key === "copyPremium") return;
     onChange({ ...value, [key]: !value[key] });
   };
 
@@ -40,28 +46,55 @@ export function StepOptionSelector({ value, onChange }: Props) {
         {options.map((opt) => {
           const selected = value[opt.key];
           const Icon = opt.icon;
+          const isLocked = opt.locked;
+          const isSEOPremium = opt.key === "seoPremium";
+          const isCopyPremium = opt.key === "copyPremium";
+          const isPremiumOption = isSEOPremium || isCopyPremium;
+          
           return (
             <button
               type="button"
               key={opt.key}
               onClick={() => toggle(opt.key)}
               className={`relative rounded-lg border p-5 transition w-full text-center ${
-                selected ? "border-primary ring-2 ring-primary/30 bg-primary/5" : "hover:bg-muted"
+                isPremiumOption 
+                  ? "border-yellow-400 ring-2 ring-yellow-400/30 cursor-default" 
+                  : selected 
+                    ? "border-primary ring-2 ring-primary/30 bg-primary/5" 
+                    : "hover:bg-muted"
               }`}
             >
               {selected && (
-                <span className="absolute top-2 right-2 h-5 w-5 inline-flex items-center justify-center rounded-full text-[10px] bg-primary text-primary-foreground">
+                <span className={`absolute top-2 right-2 h-5 w-5 inline-flex items-center justify-center rounded-full text-[10px] ${
+                  isPremiumOption 
+                    ? "bg-yellow-500 text-white" 
+                    : "bg-primary text-primary-foreground"
+                }`}>
                   ✓
+                </span>
+              )}
+              {isLocked && (
+                <span className="absolute top-2 left-2 h-5 w-5 inline-flex items-center justify-center rounded-full text-[10px] bg-yellow-500 text-white">
+                  <Lock className="size-3" />
                 </span>
               )}
               <span
                 className={`mx-auto size-12 grid place-items-center rounded-md border ${
-                  selected ? "bg-primary/10 text-primary border-primary/30" : "bg-muted text-foreground/60 border-transparent"
+                  isPremiumOption
+                    ? "bg-yellow-100 text-yellow-600 border-yellow-300"
+                    : selected 
+                      ? "bg-primary/10 text-primary border-primary/30" 
+                      : "bg-muted text-foreground/60 border-transparent"
                 }`}
               >
                 <Icon className="size-6" />
               </span>
-              <div className="mt-3 text-sm font-medium">{opt.label}</div>
+              <div className={`mt-3 text-sm font-medium`}>
+                {opt.label}
+              </div>
+              <div className={`text-xs mt-1 text-foreground/60`}>
+                {opt.description}
+              </div>
             </button>
           );
         })}

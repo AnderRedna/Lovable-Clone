@@ -142,6 +142,23 @@ export function normalizeAppFileContent(filePath: string, content: string): stri
   if (!/^app\//i.test(filePath) || typeof content !== 'string') return content;
   let out = content;
 
+  // 0) Auto-detect and add "use client" for components with React hooks or browser APIs
+  const needsUseClient = (
+    // React hooks
+    /\b(useState|useEffect|useRef|useCallback|useMemo|useReducer|useContext|useLayoutEffect|useImperativeHandle|useDebugValue|useDeferredValue|useId|useInsertionEffect|useSyncExternalStore|useTransition)\b/.test(out) ||
+    // Browser APIs
+    /\b(window|document|localStorage|sessionStorage|navigator|location|history|addEventListener|removeEventListener)\b/.test(out) ||
+    // Event handlers
+    /\b(onClick|onChange|onSubmit|onFocus|onBlur|onKeyDown|onKeyUp|onMouseEnter|onMouseLeave)\s*=/.test(out) ||
+    // Form elements that typically need interactivity
+    (/\b(form|input|button|textarea|select)\b/i.test(out) && /\b(value|checked|disabled)\s*=/.test(out))
+  );
+
+  if (needsUseClient && !/^\s*["']use client["']/m.test(out)) {
+    // Add "use client" as the very first line
+    out = `"use client";\n${out}`;
+  }
+
   // 1) Fix relative kebab-case imports to PascalCase
   out = out.replace(/from\s+(["'])\.\/(?!\.)([a-z0-9\-]+)(?:\.(?:tsx|ts|jsx|js))?\1/g, (m, quote, slug) => {
     const pascal = slug.replace(/\.(tsx|ts|jsx|js)$/i, "").split(/[^A-Za-z0-9]+/).filter(Boolean).map((p: string) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
