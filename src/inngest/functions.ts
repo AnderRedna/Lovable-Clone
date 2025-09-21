@@ -284,10 +284,12 @@ export const codeAgentFunction = inngest.createFunction(
               try { prev = await sandbox.files.read(path); } catch {}
               // If file missing or it's the default Next.js starter, start from a minimal shell
               if (!prev || DEFAULT_NEXT_TEMPLATE_RE.test(prev)) {
-                prev = `"use client";\n\nexport default function Page(){\n  return (<main className=\"min-h-screen w-full\"></main>);\n}\n`;
+                prev = `"use client";\n\nexport default function Page(){\n  return (\n    <main className=\"min-h-screen w-full\">\n    </main>\n  );\n}\n`;
               }
-              // Simplified approach: just add import and jsx without complex processing
+              
               let next = prev;
+              
+              // Add import if not already present
               if (importLine?.trim() && !prev.includes(importLine.trim())) {
                 const lines = prev.split("\n");
                 let insertIdx = 0;
@@ -299,21 +301,75 @@ export const codeAgentFunction = inngest.createFunction(
                 lines.splice(insertIdx, 0, importLine.trim());
                 next = lines.join("\n");
               }
-              // Insert JSX into main tag or at the end
+              
+              // Ensure proper page structure with components inside main
               const mainMatch = next.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i);
               if (mainMatch) {
                 const mainContent = mainMatch[1];
-                const newMainContent = position === "prepend" 
-                  ? `\n      ${jsx}\n${mainContent}` 
-                  : `${mainContent}\n      ${jsx}\n`;
-                next = next.replace(/<main\b[^>]*>[\s\S]*?<\/main>/i, 
+                
+                // Check if there are components outside main that should be inside
+                const beforeMain = next.substring(0, next.indexOf(mainMatch[0]));
+                const afterMain = next.substring(next.indexOf(mainMatch[0]) + mainMatch[0].length);
+                
+                // Find components that are outside main (like sections, components, etc.)
+                const outsideComponents = [];
+                const componentRegex = /<([A-Z][a-zA-Z0-9]*(?:Section|Component|Banner|Hero|Feature|Pricing|Footer|Navbar|Header)?)\s*(?:[^>]*)?\/?>(?:[\s\S]*?<\/\1>)?/g;
+                
+                let match;
+                const outsideContent = beforeMain + afterMain;
+                while ((match = componentRegex.exec(outsideContent)) !== null) {
+                  const componentName = match[1];
+                  const fullMatch = match[0];
+                  // Skip if it's already in main or if it's a structural component that should stay outside
+                  if (!mainContent.includes(`<${componentName}`) && 
+                      !['Html', 'Head', 'Body', 'Script', 'Link', 'Meta'].includes(componentName)) {
+                    outsideComponents.push(fullMatch);
+                  }
+                }
+                
+                // Move outside components into main and add new jsx
+                let newMainContent = mainContent;
+                
+                // Add outside components to main content
+                for (const component of outsideComponents) {
+                  if (!newMainContent.includes(component)) {
+                    newMainContent = position === "prepend" 
+                      ? `\n      ${component}${newMainContent}` 
+                      : `${newMainContent}\n      ${component}`;
+                  }
+                }
+                
+                // Add the new jsx component
+                newMainContent = position === "prepend" 
+                  ? `\n      ${jsx}${newMainContent}` 
+                  : `${newMainContent}\n      ${jsx}`;
+                
+                // Clean up the content outside main by removing components that were moved
+                let cleanedNext = next;
+                for (const component of outsideComponents) {
+                  cleanedNext = cleanedNext.replace(component, '');
+                }
+                
+                // Replace main content with the updated version
+                cleanedNext = cleanedNext.replace(/<main\b[^>]*>[\s\S]*?<\/main>/i, 
                   mainMatch[0].replace(mainContent, newMainContent));
+                
+                next = cleanedNext;
               } else {
-                next = next + `\n${jsx}\n`;
+                // If no main tag found, wrap everything in main
+                const returnMatch = next.match(/return\s*\(\s*([\s\S]*?)\s*\)\s*;?\s*}/);
+                if (returnMatch) {
+                  const returnContent = returnMatch[1];
+                  const wrappedContent = `\n    <main className="min-h-screen w-full">\n      ${returnContent}\n      ${jsx}\n    </main>\n  `;
+                  next = next.replace(returnMatch[0], `return (${wrappedContent});}`);
+                } else {
+                  next = next + `\n${jsx}\n`;
+                }
               }
+              
               await sandbox.files.write(path, next);
               network.state.data.files[path] = next;
-              return `Updated ${path} with safe merge`;
+              return `Updated ${path} with safe merge - components properly placed inside main`;
             });
           },
         }),
@@ -753,53 +809,7 @@ export const codeAgentFunction = inngest.createFunction(
           console.warn("postprocess: tailwind config ensure failed", e);
         }
 
-        // 2.5) Ensure next.config images allows required domains
-        try {
-          const jsPath = "next.config.js";
-          const mjsPath = "next.config.mjs";
-          const jsRaw = await readSafe(jsPath);
-          const mjsRaw = await readSafe(mjsPath);
 
-          const requiredDomains = ['picsum.photos', 'mariabot20util.s3.sa-east-1.amazonaws.com', 'thispersondoesnotexist.com'];
-          
-          if (!jsRaw && !mjsRaw) {
-            // Use modern remotePatterns for Next.js 12.3.0+
-            const cfg = `/** @type {import('next').NextConfig} */\nconst nextConfig = {\n  images: {\n    remotePatterns: [\n      {\n        protocol: 'https',\n        hostname: 'picsum.photos',\n      },\n      {\n        protocol: 'https',\n        hostname: 'mariabot20util.s3.sa-east-1.amazonaws.com',\n      },\n    ],\n  },\n};\nmodule.exports = nextConfig;\n`;
-            await sandbox.files.write(jsPath, cfg);
-            result.state.data.files[jsPath] = cfg;
-          } else if (jsRaw) {
-            let needsUpdate = false;
-            for (const domain of requiredDomains) {
-              if (!jsRaw.includes(domain)) {
-                needsUpdate = true;
-                break;
-              }
-            }
-            
-            if (needsUpdate) {
-              // Check if config uses remotePatterns or domains
-              if (jsRaw.includes('remotePatterns')) {
-                // Add to existing remotePatterns
-                let patched = jsRaw;
-                for (const domain of requiredDomains) {
-                  if (!patched.includes(domain)) {
-                    const newPattern = `      {\n        protocol: 'https',\n        hostname: '${domain}',\n      },`;
-                    patched = patched.replace(/remotePatterns:\s*\[/, `remotePatterns: [\n${newPattern}`);
-                  }
-                }
-                await sandbox.files.write(jsPath, patched);
-                result.state.data.files[jsPath] = patched;
-              } else {
-                // Fallback to domains for older Next.js versions
-                const patched = `${jsRaw}\n// Ensure required domains for next/image\nmodule.exports.images = module.exports.images || {};\nmodule.exports.images.domains = Array.from(new Set([...(module.exports.images.domains || []), ...${JSON.stringify(requiredDomains)}]));\n`;
-                await sandbox.files.write(jsPath, patched);
-                result.state.data.files[jsPath] = patched;
-              }
-            }
-          }
-        } catch (e) {
-          console.warn("postprocess: ensure next.config images failed", e);
-        }
 
         // 3) Ensure globals.css has CSS variables for shadcn
         try {

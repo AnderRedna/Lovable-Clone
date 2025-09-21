@@ -324,9 +324,22 @@ export { Input }
       'package.json': JSON.stringify(packageJson, null, 2),
       'next.config.js': `/** @type {import('next').NextConfig} */
 const nextConfig = {
-  // experimental: {
-  //   appDir: true,
-  // },
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'picsum.photos',
+      },
+      {
+        protocol: 'https',
+        hostname: 'mariabot20util.s3.sa-east-1.amazonaws.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'thispersondoesnotexist.com',
+      },
+    ],
+  },
 }
 
 module.exports = nextConfig

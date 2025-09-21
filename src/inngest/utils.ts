@@ -228,28 +228,49 @@ export function upsertMetadataInLayout(src: string, title: string, description: 
   }
 
   // Replace existing metadata object or insert a new one before RootLayout
-  const metaRe = /export\s+const\s+metadata\s*(?::\s*Metadata\s*)?=\s*\{([\s\S]*?)\}\s*;?/m;
+  // Match the entire metadata export including all nested content until the next export
+  const metaRe = /export\s+const\s+metadata\s*(?::\s*Metadata\s*)?=\s*\{[\s\S]*?\}\s*;[\s\S]*?(?=export\s+const\s+viewport|export\s+default\s+function|$)/m;
   if (metaRe.test(next)) {
-    next = next.replace(metaRe, (_full, body) => {
-      let b = String(body);
-      // title
-      if (/\btitle\s*:/.test(b)) {
-        b = b.replace(/\btitle\s*:\s*([^,}]+)(?=([^}]*))(,?)/, `title: ${JSON.stringify(title)}$3`);
+    next = next.replace(metaRe, (match) => {
+      // Check if siteConfig is imported/available in the file
+      const hasSiteConfig = /siteConfig/.test(next);
+      
+      if (hasSiteConfig) {
+        // Preserve existing structure with siteConfig
+        return `export const metadata: Metadata = {
+  title: {
+    default: ${JSON.stringify(title)},
+    template: \`%s | \${siteConfig.name}\`,
+  },
+  description: ${JSON.stringify(description)},
+  icons: {
+    icon: [
+      {
+        href: "/logo.svg",
+        url: "/logo.svg",
+      },
+    ],
+  },
+};
+
+`;
       } else {
-        b = `  title: ${JSON.stringify(title)},\n` + b.replace(/^\s+/, "");
+        // Simple structure without siteConfig reference
+        return `export const metadata: Metadata = {
+  title: ${JSON.stringify(title)},
+  description: ${JSON.stringify(description)},
+  icons: {
+    icon: [
+      {
+        href: "/logo.svg",
+        url: "/logo.svg",
+      },
+    ],
+  },
+};
+
+`;
       }
-      // description
-      if (/\bdescription\s*:/.test(b)) {
-        b = b.replace(/\bdescription\s*:\s*([^,}]+)(?=([^}]*))(,?)/, `description: ${JSON.stringify(description)}$3`);
-      } else {
-        // insert after title if present
-        if (/\btitle\s*:/.test(b)) {
-          b = b.replace(/(\btitle\s*:\s*[^,}]+,?)/, `$1\n  description: ${JSON.stringify(description)},`);
-        } else {
-          b = `  description: ${JSON.stringify(description)},\n` + b.replace(/^\s+/, "");
-        }
-      }
-      return `export const metadata: Metadata = {\n${b.trim()}\n};`;
     });
   } else {
     next = next.replace(
