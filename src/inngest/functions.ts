@@ -1128,7 +1128,7 @@ export const codeAgentFunction = inngest.createFunction(
             type: "ERROR",
           },
         });
-        console.log("❌ Saved error result:", errorMessage.id);
+        console.log("❌ Saved error result:", errorMessage);
         return errorMessage;
       }
 

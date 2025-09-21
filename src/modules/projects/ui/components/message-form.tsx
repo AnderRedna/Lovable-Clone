@@ -119,12 +119,12 @@ const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits, isProces
 
   return (
     <Form {...form}>
-      {/* {showUsage && (
+      {showUsage && (
         <Usage
           points={usage.remainingPoints}
           msBeforeNext={usage.msBeforeNext}
         />
-      )} */}
+      )}
       <form
         onSubmit={form.handleSubmit(onSubmit)}
         className={cn(

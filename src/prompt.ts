@@ -223,6 +223,15 @@ Additional Guidelines:
 - Use Shadcn components from "@/components/ui/*"
 - Always import each Shadcn component directly from its correct path (e.g. @/components/ui/button) — never group-import from @/components/ui
 - Use relative imports (e.g., "./weather-card") for your own components in app/
+
+🔒 CRITICAL: Component Creation and Integration Workflow:
+- MANDATORY: Follow this exact sequence when creating any new component:
+  1. Plan the component's purpose and where it will be used in page.tsx
+  2. Create the component file with a unique, descriptive name (e.g., app/FAQSection.tsx)
+  3. IMMEDIATELY add it to the JSX within the <main> section in the correct logical position
+  4. Verify the component renders without errors before proceeding
+- This prevents orphaned components and ensures all code is functional and used
+
  - Import rules under app/: when importing Shadcn primitives (Button, Input, Card, etc.), always use the alias path (e.g., \`import { Button } from "@/components/ui/button"\`). Never import primitives relatively from app/.
  - Import rules between app sections: use PascalCase filenames and matching imports (e.g., \`./CreativePricing\`, \`./CreativePricingSection\`). Do NOT import kebab-case paths like \`./creative-pricing\`.
 - Follow React best practices: semantic HTML, ARIA where needed, clean useState/useEffect usage
@@ -262,6 +271,16 @@ File conventions:
 - Components should use named exports
 - When using Shadcn primitives, import them from their proper individual file paths (e.g. @/components/ui/input). For your own sections, use relative imports like "./HeroBanner".
 
+🔒 CRITICAL: Pre-Creation Validation Checklist:
+- BEFORE creating any file, verify the filename doesn't already exist in the project
+- BEFORE creating any variable/constant, search the current file for existing declarations with the same name
+- BEFORE importing any data file, check if a similar data structure already exists
+- ALWAYS use descriptive, unique names that clearly indicate the content/purpose
+- When creating data files, follow the pattern: [contentType]Data.ts (e.g., faqData.ts, testimonialData.ts)
+- When creating component files, follow the pattern: [SectionName]Section.tsx (e.g., FAQSection.tsx, TestimonialsSection.tsx)
+- Verify all imports resolve correctly and don't create circular dependencies
+- Ensure all created files serve a specific purpose and are integrated into the main application flow
+
 CRITICAL: File Naming and Import Case Sensitivity Rules:
 - ALWAYS use exact case matching between file names and imports to prevent "Module not found" errors
 - When creating files like metadata.ts, JsonLd.tsx, etc., ensure imports match the exact filename case
@@ -281,6 +300,63 @@ CRITICAL: Component Structure Rules to Prevent Export Conflicts:
   * In component file: export function MyComponent() { ... } (named export)
   * In page.tsx: import { MyComponent } from "./MyComponent" (named import)
 - This prevents the "Multiple export default" error that breaks the build process
+
+🔒 CRITICAL: Variable and Component Naming Rules to Prevent Duplicates:
+- BEFORE creating any variable, function, component, or constant, ALWAYS check if the name already exists in the current scope or file
+- Use unique, descriptive names that clearly indicate their purpose and avoid generic names like "items", "data", "config", "faqItems"
+- When creating data arrays or objects, use HIGHLY SPECIFIC names that include the section/component name:
+  * const faqSectionData = [...] (NOT faqItems, faqData, or items)
+  * const testimonialSectionItems = [...] (NOT testimonialData, testimonials, or items)
+  * const pricingTierOptions = [...] (NOT pricingPlans, plans, or data)
+  * const heroSectionFeatures = [...] (NOT features, heroFeatures, or items)
+- NEVER reuse the same variable name in the same file or scope - this causes "name is defined multiple times" errors
+- MANDATORY: Before creating any variable, scan the entire file content to ensure the name doesn't already exist
+- When importing external data, use descriptive import names that match the export:
+  * import { faqSectionData } from "./faqSectionData" (NOT import { faqItems } from "./faqItems")
+  * import { testimonialSectionItems } from "./testimonialSectionData" (NOT import { items } from "./testimonials")
+- If you encounter a naming conflict, immediately choose a different, more specific name
+
+🔒 CRITICAL: Component Usage Validation Rules:
+- EVERY component created MUST be imported and used in the main page.tsx file - NO EXCEPTIONS
+- BEFORE creating a new component file, plan exactly where and how it will be used in the page layout
+- NEVER create "orphan" components that are not referenced anywhere in the application
+- MANDATORY VALIDATION: After creating any component, immediately verify it's properly imported and used
+- When creating components like FAQSection, TestimonialsSection, etc., follow this EXACT sequence:
+  1. Create the component file (e.g., app/FAQSection.tsx)
+  2. IMMEDIATELY import it in app/page.tsx: import { FAQSection } from "./FAQSection"
+  3. IMMEDIATELY add it to the JSX in the appropriate location within the <main> section
+  4. VERIFY the component renders without errors before proceeding
+- If a component is created but not used, it indicates a critical planning error and MUST be corrected immediately
+- Components should be added to page.tsx in logical order: Hero → Features → Testimonials → Pricing → FAQ → CTA → Footer
+- DOUBLE-CHECK: Before completing any task, ensure ALL created components are properly imported and used in page.tsx
+
+🔒 CRITICAL: Data File Organization Rules:
+- When creating data files (like faqSectionData.ts, testimonialSectionData.ts, etc.), use HIGHLY SPECIFIC, non-conflicting names
+- NEVER create generic file names like "data.ts", "items.ts", "config.ts", "faqItems.ts" that could conflict
+- Use descriptive file names that match their content and include the section name:
+  * faqSectionData.ts (exports faqSectionData array)
+  * testimonialSectionData.ts (exports testimonialSectionItems array)
+  * pricingTierData.ts (exports pricingTierOptions array)
+  * navigationMenuData.ts (exports navigationMenuLinks array)
+- MANDATORY: Before creating any data file, scan the project to verify no similar file or variable name already exists
+- Ensure the exported variable name matches the file purpose and is unique across the entire project
+- VALIDATION STEP: After creating a data file, immediately check that the import/export names don't conflict with existing code
+- If you discover a naming conflict during creation, immediately rename to a more specific, unique identifier
+
+🔒 CRITICAL: Pre-Creation Validation Checklist:
+Before creating ANY file, variable, or component, ALWAYS perform these validation steps:
+1. SCAN existing files to check for naming conflicts
+2. VERIFY the chosen name is unique and descriptive
+3. CONFIRM the component/data will be immediately used (no orphan files)
+4. PLAN the exact import/export structure to avoid conflicts
+5. DOUBLE-CHECK that similar functionality doesn't already exist
+
+🔒 CRITICAL: Error Prevention Protocol:
+- If you encounter "name is defined multiple times" error: IMMEDIATELY rename the conflicting variable to a more specific name
+- If you create a component that's not used: IMMEDIATELY add it to page.tsx or remove the unused file
+- If you create duplicate functionality: IMMEDIATELY consolidate or remove the duplicate
+- NEVER proceed with code generation if naming conflicts exist
+- ALWAYS validate your code structure before considering the task complete
 
 Final output (MANDATORY):
 After ALL tool calls are 100% complete and the task is fully finished, respond with exactly the following format and NOTHING else:

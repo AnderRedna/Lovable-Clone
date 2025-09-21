@@ -3,9 +3,9 @@ import { auth } from "@clerk/nextjs/server";
 
 import prisma from "./prisma";
 
-const FREE_POINTS = 1;
-const PRO_POINTS = 2;
-const DURATION = 30 * 24 * 60 * 60; // 30 days
+const FREE_POINTS = 5;
+const PRO_POINTS = 100;
+const DURATION = 30 * 24 * 60 * 60;
 const GENERATION_COST = 1;
 
 export async function getUsageTracker() {

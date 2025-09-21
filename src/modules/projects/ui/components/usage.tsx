@@ -1,5 +1,6 @@
 import { useAuth } from "@clerk/nextjs";
 import { formatDuration, intervalToDuration } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { CrownIcon } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
@@ -22,7 +23,10 @@ const Usage = ({ msBeforeNext, points }: UsageProps) => {
           start: new Date(),
           end: new Date(Date.now() + msBeforeNext),
         }),
-        { format: ["months", "days", "hours"] }
+        { 
+          format: ["months", "days", "hours"],
+          locale: ptBR
+        }
       );
     } catch (error) {
       console.error("Error formatting duration " + error);
@@ -35,9 +39,9 @@ const Usage = ({ msBeforeNext, points }: UsageProps) => {
       <div className="flex items-center gap-x-2">
         <div>
           <p className="text-sm">
-            {points} {hasProAccess ? "" : "free"} créditos sobrando
+            {points} créditos sobrando
           </p>
-          <p className="text-xs text-muted-foreground">Resets in {resetTime}</p>
+          <p className="text-xs text-muted-foreground">Reseta em {resetTime}</p>
         </div>
 
         {!hasProAccess && (
