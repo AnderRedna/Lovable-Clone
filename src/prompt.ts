@@ -262,6 +262,17 @@ File conventions:
 - Components should use named exports
 - When using Shadcn primitives, import them from their proper individual file paths (e.g. @/components/ui/input). For your own sections, use relative imports like "./HeroBanner".
 
+CRITICAL: Component Structure Rules to Prevent Export Conflicts:
+- ALWAYS place all component code directly in app/page.tsx when possible to avoid multiple export default conflicts
+- If you must create separate component files, use NAMED EXPORTS only (export function ComponentName() {}) and import them as named imports
+- NEVER create multiple files with export default in the same project - this causes compilation errors
+- When building landing pages or complex layouts, prefer writing all JSX directly in the main page.tsx file
+- Only create separate component files when the component is truly reusable across multiple pages
+- If separate files are absolutely necessary, use this pattern:
+  * In component file: export function MyComponent() { ... } (named export)
+  * In page.tsx: import { MyComponent } from "./MyComponent" (named import)
+- This prevents the "Multiple export default" error that breaks the build process
+
 Final output (MANDATORY):
 After ALL tool calls are 100% complete and the task is fully finished, respond with exactly the following format and NOTHING else:
 

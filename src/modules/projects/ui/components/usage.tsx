@@ -35,7 +35,7 @@ const Usage = ({ msBeforeNext, points }: UsageProps) => {
       <div className="flex items-center gap-x-2">
         <div>
           <p className="text-sm">
-            {points} {hasProAccess ? "" : "free"} credits remaining
+            {points} {hasProAccess ? "" : "free"} créditos sobrando
           </p>
           <p className="text-xs text-muted-foreground">Resets in {resetTime}</p>
         </div>
@@ -43,7 +43,7 @@ const Usage = ({ msBeforeNext, points }: UsageProps) => {
         {!hasProAccess && (
           <Button asChild size="sm" variant="tertiary" className="ml-auto">
             <Link href="/pricing">
-              <CrownIcon /> Upgrade
+              <CrownIcon /> Atualizar
             </Link>
           </Button>
         )}

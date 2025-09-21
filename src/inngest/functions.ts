@@ -760,7 +760,7 @@ export const codeAgentFunction = inngest.createFunction(
           const jsRaw = await readSafe(jsPath);
           const mjsRaw = await readSafe(mjsPath);
 
-          const requiredDomains = ['picsum.photos', 'mariabot20util.s3.sa-east-1.amazonaws.com'];
+          const requiredDomains = ['picsum.photos', 'mariabot20util.s3.sa-east-1.amazonaws.com', 'thispersondoesnotexist.com'];
           
           if (!jsRaw && !mjsRaw) {
             // Use modern remotePatterns for Next.js 12.3.0+
