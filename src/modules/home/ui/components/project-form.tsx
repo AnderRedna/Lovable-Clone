@@ -276,10 +276,11 @@ const ProjectForm = () => {
               </Button>
               <Button
                 variant="outline"
-                className="h-6 px-2 text-xs"
+                className="h-6 w-6 p-0 text-xs"
                 type="button"
                 onClick={improvePrompt}
                 disabled={improveMutation.isPending}
+                title={improveMutation.isPending ? "Melhorando prompt..." : "Melhorar prompt com IA"}
               >
                 {improveMutation.isPending ? (
                   <Loader2Icon className="size-3 animate-spin" />
