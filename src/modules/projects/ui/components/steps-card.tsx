@@ -95,8 +95,8 @@ export function StepsCard({ steps, messageId, forceComplete }: { steps: string[]
         {visibleSteps.map((step, index) => (
           <div key={index} className="flex items-center gap-2">
             {step.state === "completed" ? (
-              <CheckCircle className="h-4 w-4 text-green-500" />)
-              : (<Loader className="h-4 w-4 text-muted-foreground animate-spin" />)}
+              <CheckCircle className="size-4 text-green-500 shrink-0" />)
+              : (<Loader className="size-4 text-muted-foreground animate-spin shrink-0" />)}
             <span className={`text-base ${step.state === "completed" ? "text-muted-foreground/80" : "text-muted-foreground animate-pulse"}`}>
               {step.text}
             </span>
