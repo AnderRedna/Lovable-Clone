@@ -65,7 +65,7 @@ TODAS as páginas devem implementar automaticamente as seguintes práticas de SE
 - Estrutura semântica HTML5: <header>, <main>, <section>, <article>, <aside>, <footer>
 - Hierarquia de headings: h1 único por página, h2-h6 em ordem lógica
 - Alt text descritivo em todas as imagens
-- Schema.org/JSON-LD para dados estruturados quando relevante
+- Schema.org/JSON-LD: implementar dados estruturados usando <script type="application/ld+json" dangerouslySetInnerHTML={{__html: JSON.stringify(structuredData)}}></script> no layout.tsx ou componentes React, NUNCA criar arquivos .tsx com JSON puro
 - Lazy loading para imagens: loading="lazy"
 - Texto âncora descritivo em links
 - Core Web Vitals otimizados: performance, acessibilidade, melhores práticas
