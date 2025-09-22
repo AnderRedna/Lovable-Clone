@@ -1,4 +1,4 @@
-import { CopyCheckIcon, CopyIcon, DownloadIcon } from "lucide-react";
+import { CopyCheckIcon, CopyIcon, DownloadIcon, Loader2 } from "lucide-react";
 import { Fragment, useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -100,6 +100,7 @@ const FileExplorer = ({ files, projectId }: FileExplorerProps) => {
     return fileKeys.length > 0 ? fileKeys[0] : null;
   });
   const [copied, setCopied] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const treeData = useMemo(() => {
     return convertFilesToTreeItems(allFiles);
@@ -132,11 +133,45 @@ const FileExplorer = ({ files, projectId }: FileExplorerProps) => {
   };
 
   const handleDownload = async () => {
+    if (isDownloading) return; // Evita múltiplos downloads simultâneos
+    
+    setIsDownloading(true);
     try {
+      // Primeiro, tentar download direto do sandbox
+      toast.info("Realizando download do sandbox...");
+      
+      const sandboxResponse = await fetch(`/api/projects/${projectId}/download-from-sandbox`);
+      
+      if (sandboxResponse.ok) {
+        // Download do sandbox bem-sucedido
+        const blob = await sandboxResponse.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `project-${projectId}-sandbox.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        toast.success("Download do sandbox concluído!");
+        return;
+      }
+      
+      // Se falhou, verificar se é erro de sandbox indisponível
+      const sandboxError = await sandboxResponse.json().catch(() => ({}));
+      if (sandboxError.fallback || sandboxResponse.status === 503) {
+        toast.info("Sandbox indisponível. Usando geração manual...");
+      } else {
+        console.warn("Erro no download do sandbox:", sandboxError);
+        toast.info("Erro no sandbox. Usando geração manual...");
+      }
+      
+      // Fallback: usar geração manual
       const response = await fetch(`/api/projects/${projectId}/download-zip`);
       if (!response.ok) {
         throw new Error('Failed to download ZIP');
       }
+      
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -146,9 +181,13 @@ const FileExplorer = ({ files, projectId }: FileExplorerProps) => {
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
-      toast.success("Download started");
+      toast.success("Download manual concluído!");
+      
     } catch (error) {
-      toast.error("Failed to download ZIP");
+      console.error("Erro no download:", error);
+      toast.error("Falha no download. Tente novamente.");
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -168,16 +207,17 @@ const FileExplorer = ({ files, projectId }: FileExplorerProps) => {
             <div className="border-b bg-sidebar px-4 py-2 flex justify-between items-center gap-x-2">
               <FileBreadcrumb filePath={selectedFile} />
               <div className="flex gap-x-2">
-                <Hint text="Download Project ZIP" side="bottom">
+                <Hint text="Baixar projeto como ZIP" side="bottom">
                   <Button
                     variant="outline"
                     size="icon"
                     onClick={handleDownload}
+                    disabled={isDownloading}
                   >
-                    <DownloadIcon />
+                    {isDownloading ? <Loader2 className="animate-spin" /> : <DownloadIcon />}
                   </Button>
                 </Hint>
-                <Hint text="Copy to Clipboard" side="bottom">
+                <Hint text="Copiar para a área de transferência" side="bottom">
                   <Button
                     variant="outline"
                     size="icon"
