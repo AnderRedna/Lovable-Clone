@@ -468,7 +468,13 @@ export const codeAgentFunction = inngest.createFunction(
             .join("\n")}`
         : "",
       customization?.theme
-        ? `\n\nColor palette (4 colors, use as base tokens): ${customization.theme.paletteName} — ${customization.theme.colors.join(", ")}`
+        ? `\n\nColor palette selected: ${customization.theme.paletteName} — ${customization.theme.colors.join(", ")}
+IMPORTANT: Use these 4 colors as the primary design tokens:
+- Primary color (main brand): ${customization.theme.colors[0]}
+- Secondary color (accents): ${customization.theme.colors[1]} 
+- Dark color (text/backgrounds): ${customization.theme.colors[2]}
+- Light color (backgrounds/borders): ${customization.theme.colors[3]}
+Apply these colors throughout the design for buttons, backgrounds, text, borders, and accents. Override the default blue color scheme with this selected palette.`
         : "",
       customization?.analytics && customization.analytics.provider !== "none"
         ? `\n\nAnalytics: ${customization.analytics.provider}${customization.analytics.code ? ` (${customization.analytics.code.slice(0, 40)}...)` : ""}`

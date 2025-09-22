@@ -3,7 +3,7 @@
 import { useClerk } from "@clerk/nextjs";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpIcon, Loader2Icon, SettingsIcon, ChevronLeft, SparklesIcon } from "lucide-react";
+import { ArrowUpIcon, Loader2Icon, SettingsIcon, ChevronLeft, SparklesIcon, Zap } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import TextareaAutosize from "react-textarea-autosize";
@@ -20,6 +20,8 @@ import { AnalyticsStep, ComponentsStep, ComponentPromptsStep } from "./project-f
 import { WizardModal } from "./project-form/WizardModal";
 import { ProjectWizard } from "./project-form/ProjectWizard";
 import type { ColorPalette } from "./project-form/PaletteSelector";
+import { PaletteButton } from "./project-form/PaletteButton";
+import { curatedPalettes } from "./project-form/palettes";
 import { getOrderedComponentKeys } from "./project-form/types";
 
 const formSchema = z.object({
@@ -117,7 +119,7 @@ const ProjectForm = () => {
   const [wizardActive, setWizardActive] = useState(false);
   // legacy step state removed; new wizard handles steps dynamically
   const [componentEditIndex, setComponentEditIndex] = useState<number | null>(null);
-  const [selectedPalette, setSelectedPalette] = useState<ColorPalette | null>(null);
+  const [selectedPalette, setSelectedPalette] = useState<ColorPalette | null>(curatedPalettes[0]);
 
   type AnalyticsProvider = import("./project-form/types").AnalyticsProvider;
   type ComponentKey = import("./project-form/types").ComponentKey;
@@ -161,7 +163,7 @@ const ProjectForm = () => {
         return acc;
       }, {} as Record<ComponentKey, ComponentConfig>)
     );
-    setSelectedPalette(null);
+    setSelectedPalette(curatedPalettes[0]);
   };
 
   const isPending = createProject.isPending;
@@ -280,19 +282,18 @@ const ProjectForm = () => {
                 disabled={improveMutation.isPending}
               >
                 {improveMutation.isPending ? (
-                  <>
-                    <Loader2Icon className="size-3 mr-1 animate-spin" />
-                    Melhorando
-                  </>
+                  <Loader2Icon className="size-3 animate-spin" />
                 ) : (
-                  <>
-                    <SparklesIcon className="size-3 mr-1" />
-                    Melhorar
-                  </>
+                  <Zap className="size-3" />
                 )}
               </Button>
             </div>
             <div className="flex items-center gap-2">
+              <PaletteButton
+                selectedPalette={selectedPalette}
+                onPaletteSelect={setSelectedPalette}
+                className="mr-1"
+              />
               <Button
                 type="button"
                 onClick={handleArrowAction}
