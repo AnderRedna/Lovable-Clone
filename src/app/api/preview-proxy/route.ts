@@ -137,7 +137,7 @@ function injectEditorScript(html: string, edit: boolean) {
     var excludedTags = new Set(['SCRIPT','STYLE','SVG']);
     var nextId = 1;
 
-    // 1) Wrap all visible text nodes into editable spans
+    // 1) Wrap text nodes individually to preserve formatting and order
     var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
       acceptNode: function(node){
         try {
@@ -154,11 +154,16 @@ function injectEditorScript(html: string, edit: boolean) {
     var nodes = [];
     while (walker.nextNode()) nodes.push(walker.currentNode);
 
-    nodes.forEach(function(textNode){
+    // Process each text node individually to preserve formatting
+    nodes.forEach(function(textNode) {
       if (!enabled) return;
-      var parent = textNode.parentElement; if (!parent) return;
+      var parent = textNode.parentElement;
+      if (!parent) return;
+      
       var key = String(nextId++);
-      var oldText = (textNode.nodeValue||'').trim();
+      var oldText = (textNode.nodeValue || '').trim();
+      if (!oldText) return;
+      
       var span = document.createElement('span');
       span.setAttribute('data-inline-wrapper','1');
       span.setAttribute('data-inline-id', key);
@@ -166,6 +171,7 @@ function injectEditorScript(html: string, edit: boolean) {
       span.style.outline='1.5px dashed rgba(239,68,68,0.95)';
       span.style.outlineOffset='2px';
       span.textContent = oldText;
+      
       parent.replaceChild(span, textNode);
 
       function onInput(){
@@ -352,7 +358,7 @@ function injectEditorScript(html: string, edit: boolean) {
       span.addEventListener('click', showToolbar);
       span.addEventListener('dblclick', stopClick);
 
-      teardownFns.push(function(){ try{ span.removeEventListener('input', onInput); span.removeEventListener('click', showToolbar); span.removeEventListener('dblclick', stopClick);}catch(e){}; try{ var t=document.createTextNode(span.textContent||''); parent.replaceChild(t, span); }catch(e){} });
+      teardownFns.push(function(){ try{ span.removeEventListener('input', onInput); span.removeEventListener('click', showToolbar); span.removeEventListener('dblclick', stopClick);}catch(e){}; try{ var t=document.createTextNode(span.textContent||''); if(parent && parent.contains(span)) parent.replaceChild(t, span); }catch(e){} });
     });
 
     // 2) Placeholder editing for input/textarea via dblclick -> prompt

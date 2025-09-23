@@ -7,6 +7,7 @@ import {
   MonitorIcon,
   TabletIcon,
   SmartphoneIcon,
+  LoaderIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -22,9 +23,10 @@ interface FragmentWebProps {
   data: Fragment;
   isEditing?: boolean;
   registerCollector?: (collector: () => Array<EditPair>) => void;
+  isTransitioning?: boolean;
 }
 
-const FragmentWeb = ({ data, isEditing, registerCollector }: FragmentWebProps) => {
+const FragmentWeb = ({ data, isEditing, registerCollector, isTransitioning }: FragmentWebProps) => {
   const [fragmentKey, setFragmentKey] = useState(0);
   const [device, setDevice] = useState<"desktop" | "tablet" | "mobile">(
     "desktop"
@@ -135,8 +137,20 @@ const FragmentWeb = ({ data, isEditing, registerCollector }: FragmentWebProps) =
   }, [isEditing, proxiedUrl]);
 
   return (
-    <div className="flex flex-col w-full h-full">
-  <div className="p-2 border-b bg-sidebar flex items-center gap-x-2 relative">
+    <div className="flex flex-col w-full h-full relative">
+      {/* Overlay de transição com fade in para preto e spinner */}
+      {isTransitioning && (
+        <div className="absolute inset-0 bg-black/80 z-50 flex items-center justify-center animate-in fade-in-0 duration-300">
+          <div className="flex flex-col items-center gap-4 text-white">
+            <LoaderIcon className="h-8 w-8 animate-spin" />
+            <p className="text-sm font-medium">
+              {isEditing ? "Carregando edição..." : "Carregando preview..."}
+            </p>
+          </div>
+        </div>
+      )}
+      
+      <div className="p-2 border-b bg-sidebar flex items-center gap-x-2 relative">
         <Hint text="Clique para atualizar" side="bottom" align="start">
           <Button size="sm" variant="outline" onClick={onRefresh}>
             <RefreshCcwIcon />

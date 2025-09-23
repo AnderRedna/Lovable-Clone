@@ -146,6 +146,32 @@ const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits, isProces
     }
   };
 
+  const handleToggleEditing = () => {
+    if (isEditing && hasUnsavedChanges) {
+      // Se está editando e tem mudanças não salvas, mostrar aviso
+      const id = toast("Você tem alterações não salvas. Deseja sair sem salvar?", {
+        duration: Infinity,
+        position: "bottom-center",
+        action: {
+          label: "Sair sem salvar",
+          onClick: () => {
+            onToggleEditing?.();
+            toast.dismiss(id);
+          }
+        },
+        cancel: {
+          label: "Cancelar",
+          onClick: () => {
+            toast.dismiss(id);
+          }
+        }
+      });
+    } else {
+      // Chamar a função de toggle que já inclui a animação
+      onToggleEditing?.();
+    }
+  };
+
   const [isFocused, setIsFocused] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [toastId, setToastId] = useState<string | number | null>(null);
@@ -244,15 +270,15 @@ const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits, isProces
   <div className="flex gap-x-2 items-end justify-end pt-2">
           <Button
             type="button"
-            variant="outline"
+            variant={isEditing ? "default" : "outline"}
             size="sm"
             title={isEditing ? "Modo de edição ativo" : "Editar"}
-            onClick={() => onToggleEditing?.()}
+            onClick={handleToggleEditing}
             className={cn(
-              "border-2 text-white hover:bg-white/10",
+              "border-2 transition-colors",
               isEditing 
-                ? "bg-blue-600 border-blue-600 animate-pulse" 
-                : "bg-white border-white"
+                ? "!bg-green-600 !border-green-600 !text-white hover:!bg-green-700 hover:!border-green-700" 
+                : "bg-black border-black text-white hover:bg-gray-800 hover:border-gray-800"
             )}
           >
             <PencilIcon className="h-4 w-4" />

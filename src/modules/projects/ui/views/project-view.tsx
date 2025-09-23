@@ -34,6 +34,7 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
   const [activeFragment, setActiveFragment] = useState<Fragment | null>(null);
   const [tabState, setTabState] = useState<"preview" | "code">("preview");
   const [isEditing, setIsEditing] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const collectorRef = useRef<() => Array<{ selector: string; oldText: string; newText: string }>>(() => []);
 
   const registerCollector = (
@@ -85,6 +86,7 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
                 setActiveFragment={setActiveFragment}
                 isEditing={isEditing}
                 setIsEditing={setIsEditing}
+                setIsTransitioning={setIsTransitioning}
                 getEdits={() => collectorRef.current?.() || []}
               />
             </Suspense>
@@ -128,6 +130,7 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
                 <FragmentWeb
                   data={activeFragment}
                   isEditing={isEditing}
+                  isTransitioning={isTransitioning}
                   registerCollector={(c) => registerCollector(c)}
                 />
               ) : (

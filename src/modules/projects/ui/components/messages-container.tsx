@@ -14,6 +14,7 @@ interface MessagesContainerProps {
   setActiveFragment: (activeFragment: Fragment | null) => void;
   isEditing?: boolean;
   setIsEditing?: (v: boolean) => void;
+  setIsTransitioning?: (v: boolean) => void;
   getEdits?: () => Array<{ selector: string; oldText: string; newText: string }>;
 }
 
@@ -23,6 +24,7 @@ const MessagesContainer = ({
   setActiveFragment,
   isEditing,
   setIsEditing,
+  setIsTransitioning,
   getEdits,
 }: MessagesContainerProps) => {
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -148,7 +150,20 @@ const MessagesContainer = ({
         <MessageForm
           projectId={projectId}
           isEditing={!!isEditing}
-          onToggleEditing={() => setIsEditing?.(!isEditing)}
+          onToggleEditing={() => {
+            // Iniciar transição
+            setIsTransitioning?.(true);
+            
+            // Aguardar um pouco para mostrar o spinner, depois alternar o modo
+            setTimeout(() => {
+              setIsEditing?.(!isEditing);
+              
+              // Aguardar mais um pouco para simular carregamento, depois remover transição
+              setTimeout(() => {
+                setIsTransitioning?.(false);
+              }, 800);
+            }, 300);
+          }}
           getEdits={getEdits}
           isProcessing={isProcessing}
           onSubmittingChange={(v) => setClientPending(v)}
