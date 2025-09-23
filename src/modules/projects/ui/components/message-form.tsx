@@ -1,8 +1,8 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpIcon, Loader2Icon } from "lucide-react";
+import { ArrowUpIcon, Loader2Icon, PencilIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import TextareaAutosize from "react-textarea-autosize";
 import { toast } from "sonner";
@@ -19,7 +19,7 @@ interface MessageFormProps {
   projectId: string;
   isEditing?: boolean;
   onToggleEditing?: () => void;
-  getEdits?: () => Array<{ selector: string; oldText: string; newText: string }>;
+  getEdits?: () => Array<{ selector: string; oldText: string; newText: string; type?: string; url?: string }>;
   // Sinaliza que há uma solicitação em processamento; permite digitar, mas bloqueia envio
   isProcessing?: boolean;
   // Notifica o container quando o envio começar/terminar (para mostrar loader otimista)
@@ -92,17 +92,51 @@ const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits, isProces
       } catch {}
       await new Promise((r) => setTimeout(r, 50));
       const edits = getEdits?.() || [];
-      if (edits.length === 0) return;
+      console.log('DEBUG: Edições coletadas:', edits);
+      if (edits.length === 0) {
+        console.log('DEBUG: Nenhuma edição encontrada, saindo...');
+        return;
+      }
       onSubmittingChange?.(true);
-      const value = [
-        "Aplique as seguintes substituições de texto nos arquivos do projeto (apenas literais de texto em TSX/JSX/HTML/MD/JSON). Não altere lógica ou estrutura de componentes.",
-        ...edits.map(
-          (e, i) => `${i + 1}) \"${e.oldText}\" -> \"${e.newText}\" (selector: ${e.selector})`
-        ),
-      ].join("\n");
+      
+      // Separate text edits from hyperlinks
+      const textEdits = edits.filter(e => e.type !== 'hyperlink');
+      const hyperlinkEdits = edits.filter(e => e.type === 'hyperlink');
+      
+      console.log('DEBUG: Edições de texto:', textEdits);
+      console.log('DEBUG: Edições de hyperlink:', hyperlinkEdits);
+      
+      let instructions = [];
+      
+      if (textEdits.length > 0) {
+        instructions.push(
+          "Aplique as seguintes substituições de texto nos arquivos do projeto (apenas literais de texto em TSX/JSX/HTML/MD/JSON). Não altere lógica ou estrutura de componentes.",
+          ...textEdits.map(
+            (e, i) => `${i + 1}) \"${e.oldText}\" -> \"${e.newText}\" (selector: ${e.selector})`
+          )
+        );
+      }
+      
+      if (hyperlinkEdits.length > 0) {
+        if (instructions.length > 0) instructions.push("");
+        instructions.push(
+          "Aplique os seguintes hyperlinks nos arquivos do projeto:",
+          ...hyperlinkEdits.map(
+            (e, i) => `${i + 1}) Transformar \"${e.oldText}\" em link para \"${e.url}\" (selector: ${e.selector})`
+          )
+        );
+      }
+      
+      const value = instructions.join("\n");
+      
+      console.log('DEBUG: Instruções finais:', value);
+      console.log('DEBUG: Enviando mensagem...');
+      
       try {
         await createMessage.mutateAsync({ value, projectId });
+        console.log('DEBUG: Mensagem enviada com sucesso!');
       } catch (e) {
+        console.log('DEBUG: Erro ao enviar mensagem:', e);
         onSubmittingChange?.(false);
         throw e;
       }
@@ -113,9 +147,59 @@ const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits, isProces
   };
 
   const [isFocused, setIsFocused] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [toastId, setToastId] = useState<string | number | null>(null);
+  
   const showUsage = !!usage;
   const isPending = createMessage.isPending;
   const isDisabled = isPending || isProcessing || !form.formState.isValid;
+
+  // Detectar mudanças quando em modo de edição
+  useEffect(() => {
+    if (!isEditing) {
+      setHasUnsavedChanges(false);
+      if (toastId) {
+        toast.dismiss(toastId);
+        setToastId(null);
+      }
+      return;
+    }
+
+    const checkForChanges = () => {
+      const edits = getEdits?.() || [];
+      const hasChanges = edits.length > 0;
+      
+      if (hasChanges && !hasUnsavedChanges) {
+        setHasUnsavedChanges(true);
+        const id = toast("Você tem alterações não salvas, deseja salvar?", {
+          duration: Infinity,
+          position: "bottom-center",
+          action: {
+            label: "Salvar",
+            onClick: () => {
+              saveInlineEdits();
+              toast.dismiss(id);
+              setToastId(null);
+            }
+          },
+          onDismiss: () => {
+            setToastId(null);
+          }
+        });
+        setToastId(id);
+      } else if (!hasChanges && hasUnsavedChanges) {
+        setHasUnsavedChanges(false);
+        if (toastId) {
+          toast.dismiss(toastId);
+          setToastId(null);
+        }
+      }
+    };
+
+    // Verificar mudanças a cada 500ms quando em modo de edição
+    const interval = setInterval(checkForChanges, 500);
+    return () => clearInterval(interval);
+  }, [isEditing, hasUnsavedChanges, toastId, getEdits, saveInlineEdits]);
 
   return (
     <Form {...form}>
@@ -158,42 +242,21 @@ const MessageForm = ({ projectId, isEditing, onToggleEditing, getEdits, isProces
         />
 
   <div className="flex gap-x-2 items-end justify-end pt-2">
-          {!isEditing && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              title="Editar textos"
-              onClick={() => onToggleEditing?.()}
-              className="bg-white border-2 border-white text-white hover:bg-white/10"
-            >
-              <span style={{ fontWeight: 700 }}>T</span>
-            </Button>
-          )}
-          {isEditing && (
-            <>
-              <Button
-                type="button"
-                variant="default"
-                size="sm"
-                title="Cancelar edição"
-                onClick={() => onToggleEditing?.()}
-                className="h-8 border-0 bg-red-600 hover:bg-red-700"
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="button"
-                variant="default"
-                size="sm"
-                title="Salvar alterações"
-                onClick={saveInlineEdits}
-                className="h-8 border-0"
-              >
-                Salvar
-              </Button>
-            </>
-          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            title={isEditing ? "Modo de edição ativo" : "Editar"}
+            onClick={() => onToggleEditing?.()}
+            className={cn(
+              "border-2 text-white hover:bg-white/10",
+              isEditing 
+                ? "bg-blue-600 border-blue-600 animate-pulse" 
+                : "bg-white border-white"
+            )}
+          >
+            <PencilIcon className="h-4 w-4" />
+          </Button>
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="inline-flex" aria-disabled={isDisabled}>

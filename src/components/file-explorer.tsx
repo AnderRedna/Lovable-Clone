@@ -138,7 +138,7 @@ const FileExplorer = ({ files, projectId }: FileExplorerProps) => {
     setIsDownloading(true);
     try {
       // Primeiro, tentar download direto do sandbox
-      toast.info("Realizando download do sandbox...");
+      toast.info("Realizando download do projeto...");
       
       const sandboxResponse = await fetch(`/api/projects/${projectId}/download-from-sandbox`);
       

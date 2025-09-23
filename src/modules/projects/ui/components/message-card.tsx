@@ -11,10 +11,35 @@ interface UserMessageProps {
 }
 
 const UserMessage = ({ content }: UserMessageProps) => {
+  console.log('DEBUG UserMessage - content:', content);
   const edits = parseInlineEdits(content);
+  const hyperlinks = parseHyperlinks(content);
+  console.log('DEBUG UserMessage - edits:', edits);
+  console.log('DEBUG UserMessage - hyperlinks:', hyperlinks);
+
+  // If we have both edits and hyperlinks, show both components
+  if (edits && hyperlinks) {
+    return (
+      <div className="flex justify-end pb-4 pr-2 pl-10 space-y-2">
+        <div className="max-w-4/5 w-full space-y-2">
+          <InlineEditsMessage edits={edits} />
+          <InlineHyperlinksMessage hyperlinks={hyperlinks} />
+        </div>
+      </div>
+    );
+  }
+
+  // If we have only edits
   if (edits) {
     return <InlineEditsMessage edits={edits} />;
   }
+
+  // If we have only hyperlinks
+  if (hyperlinks) {
+    return <InlineHyperlinksMessage hyperlinks={hyperlinks} />;
+  }
+
+  // Default message display
   return (
     <div className="flex justify-end pb-4 pr-2 pl-10">
       <Card className="rounded-lg bg-muted p-3 shadow-none border-none max-w-4/5 break-words">
@@ -111,6 +136,7 @@ export { MessageCard };
 
 // Helpers
 type EditPair = { oldText: string; newText: string };
+type HyperlinkPair = { oldText: string; url: string };
 
 function parseInlineEdits(content: string): EditPair[] | null {
   if (!content) return null;
@@ -126,6 +152,53 @@ function parseInlineEdits(content: string): EditPair[] | null {
     }
   }
   return pairs.length ? pairs : null;
+}
+
+function parseHyperlinks(content: string): HyperlinkPair[] | null {
+  if (!content) return null;
+  const header = "Aplique os seguintes hyperlinks";
+  if (!content.includes(header)) return null;
+  const lines = content.split(/\n|\r/).map((s) => s.trim()).filter(Boolean);
+  const pairs: HyperlinkPair[] = [];
+  for (const line of lines) {
+    const m = line.match(/^\s*\d+\)\s*Transformar\s*"([\s\S]*?)"\s*em\s*link\s*para\s*"([\s\S]*?)"/);
+    if (m) {
+      const [, oldText, url] = m;
+      pairs.push({ oldText, url });
+    }
+  }
+  return pairs.length ? pairs : null;
+}
+
+function InlineHyperlinksMessage({ hyperlinks }: { hyperlinks: HyperlinkPair[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex justify-end pb-4 pr-2 pl-10">
+      <Card className="rounded-lg bg-muted p-3 shadow-none border max-w-4/5 w-full overflow-hidden">
+        <button
+          type="button"
+          className="w-full text-left font-medium"
+          onClick={() => setOpen((v) => !v)}
+        >
+          Aplicação de hyperlinks {open ? "▲" : "▼"}
+        </button>
+        {open && (
+          <div className="mt-3 space-y-2 overflow-hidden">
+            {hyperlinks.map((h, idx) => (
+              <div key={idx} className="text-sm break-words overflow-hidden">
+                <span className="text-muted-foreground">Texto:</span> <span className="break-all">{h.oldText}</span>
+                <span className="mx-2">→</span>
+                <span className="text-muted-foreground">Link:</span> 
+                <a href={h.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline ml-1 break-all">
+                  {h.url}
+                </a>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
 }
 
 function InlineEditsMessage({ edits }: { edits: EditPair[] }) {

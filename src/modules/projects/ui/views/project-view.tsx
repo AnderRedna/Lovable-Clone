@@ -37,7 +37,7 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
   const collectorRef = useRef<() => Array<{ selector: string; oldText: string; newText: string }>>(() => []);
 
   const registerCollector = (
-    collector: () => Array<{ selector: string; oldText: string; newText: string }>
+    collector: () => Array<{ selector: string; oldText: string; newText: string; type?: string; url?: string }>
   ) => {
     collectorRef.current = collector;
   };

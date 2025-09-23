@@ -171,15 +171,188 @@ function injectEditorScript(html: string, edit: boolean) {
       function onInput(){
         var newText = (span.textContent||'').trim();
         var selector = getSelector(span);
-        state.set(key, { key: key, selector: selector, oldText: oldText, newText: newText });
+        state.set(key, { key: key, selector: selector, oldText: oldText, newText: newText, type: 'text-edit' });
         try { parent_post({ type:'inline-edits' }); } catch(e){}
       }
+      
+      function showToolbar(e){
+        try{ e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation(); }catch(_){}
+        if (!enabled) return;
+        
+        // Remove existing toolbar
+        var existingToolbar = document.querySelector('.inline-edit-toolbar');
+        if (existingToolbar) existingToolbar.remove();
+        
+        // Create toolbar
+        var toolbar = document.createElement('div');
+        toolbar.className = 'inline-edit-toolbar';
+        toolbar.style.cssText = 'position: fixed; z-index: 10000; background: white; border: 1px solid #ccc; border-radius: 6px; padding: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: flex; gap: 4px;';
+        
+        // Position toolbar near the clicked element
+        var rect = span.getBoundingClientRect();
+        toolbar.style.left = rect.left + 'px';
+        toolbar.style.top = (rect.bottom + 5) + 'px';
+        
+        // Create hyperlink button
+        var linkBtn = document.createElement('button');
+        linkBtn.innerHTML = '🔗';
+        linkBtn.title = 'Adicionar Hyperlink';
+        linkBtn.style.cssText = 'border: none; background: #f3f4f6; padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: 14px;';
+        linkBtn.onmouseover = function(){ this.style.background = '#e5e7eb'; };
+        linkBtn.onmouseout = function(){ this.style.background = '#f3f4f6'; };
+        
+        linkBtn.onclick = function(e){
+          e.preventDefault();
+          e.stopPropagation();
+          
+          // Get selected text or use span content
+          var selection = window.getSelection();
+          var selectedText = selection.toString().trim();
+          if (!selectedText) selectedText = span.textContent.trim();
+          
+          // Show URL input modal
+          var modal = document.createElement('div');
+          modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10001; display: flex; align-items: center; justify-content: center;';
+          
+          var modalContent = document.createElement('div');
+          modalContent.style.cssText = 'background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); max-width: 500px; width: 90%; word-wrap: break-word; overflow-wrap: break-word;';
+          
+          var title = document.createElement('h3');
+          title.textContent = 'Adicionar Hyperlink';
+          title.style.cssText = 'margin: 0 0 15px 0; font-size: 16px; font-weight: 600;';
+          
+          var urlInput = document.createElement('input');
+          urlInput.type = 'url';
+          urlInput.placeholder = 'https://exemplo.com';
+          urlInput.style.cssText = 'width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 4px; margin-bottom: 15px; font-size: 14px; box-sizing: border-box; word-break: break-all; overflow-wrap: break-word;';
+          
+          var buttonContainer = document.createElement('div');
+          buttonContainer.style.cssText = 'display: flex; gap: 10px; justify-content: flex-end;';
+          
+          var cancelBtn = document.createElement('button');
+          cancelBtn.textContent = 'Cancelar';
+          cancelBtn.style.cssText = 'padding: 8px 16px; border: 1px solid #d1d5db; background: white; border-radius: 4px; cursor: pointer;';
+          
+          var applyBtn = document.createElement('button');
+          applyBtn.textContent = 'Aplicar';
+          applyBtn.style.cssText = 'padding: 8px 16px; border: none; background: #3b82f6; color: white; border-radius: 4px; cursor: pointer;';
+          
+          function closeModal(){
+            document.body.removeChild(modal);
+            toolbar.remove();
+          }
+          
+          cancelBtn.onclick = closeModal;
+          
+          applyBtn.onclick = function(){
+            var url = urlInput.value.trim();
+            if (!url) return;
+            
+            // Ensure URL has protocol
+            if (!url.match(/^https?:\\/\\//)) {
+              url = 'https://' + url;
+            }
+            
+            // Create hyperlink
+            var link = document.createElement('a');
+            link.href = url;
+            link.textContent = selectedText;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            
+            // Preserve original styling - don't override colors or decoration
+            // Get computed styles from the original span
+            var computedStyle = window.getComputedStyle(span);
+            link.style.color = computedStyle.color || 'inherit';
+            link.style.textDecoration = computedStyle.textDecoration || 'inherit';
+            link.style.fontFamily = computedStyle.fontFamily || 'inherit';
+            link.style.fontSize = computedStyle.fontSize || 'inherit';
+            link.style.fontWeight = computedStyle.fontWeight || 'inherit';
+            link.style.fontStyle = computedStyle.fontStyle || 'inherit';
+            
+            // Only add subtle underline to indicate it's a link, but preserve other styles
+            if (computedStyle.textDecoration === 'none' || !computedStyle.textDecoration) {
+              link.style.textDecoration = 'underline';
+              link.style.textDecorationColor = 'currentColor';
+              link.style.textDecorationThickness = '1px';
+            }
+            
+            // Replace span content with link
+            span.innerHTML = '';
+            span.appendChild(link);
+            
+            // Update state with hyperlink
+            var selector = getSelector(span);
+            
+            // Check if there's already a text edit for this element
+            var existingEdit = state.get(key);
+            var actualOldText = oldText;
+            
+            // If there was a previous text edit, preserve it by creating a separate hyperlink entry
+            if (existingEdit && existingEdit.type === 'text-edit' && existingEdit.oldText !== existingEdit.newText) {
+              // Create a new key for the hyperlink to preserve the text edit
+              var hyperlinkKey = key + '_hyperlink';
+              state.set(hyperlinkKey, { 
+                key: hyperlinkKey, 
+                selector: selector, 
+                oldText: existingEdit.newText, // Use the edited text as old text for hyperlink
+                newText: selectedText,
+                type: 'hyperlink',
+                url: url
+              });
+            } else {
+              // No previous text edit, just add hyperlink normally
+              state.set(key, { 
+                key: key, 
+                selector: selector, 
+                oldText: actualOldText, 
+                newText: selectedText,
+                type: 'hyperlink',
+                url: url
+              });
+            }
+            
+            try { parent_post({ type:'inline-edits' }); } catch(e){}
+            closeModal();
+          };
+          
+          // ESC key to close
+          modal.onkeydown = function(e){
+            if (e.key === 'Escape') closeModal();
+          };
+          
+          modalContent.appendChild(title);
+          modalContent.appendChild(urlInput);
+          buttonContainer.appendChild(cancelBtn);
+          buttonContainer.appendChild(applyBtn);
+          modalContent.appendChild(buttonContainer);
+          modal.appendChild(modalContent);
+          document.body.appendChild(modal);
+          
+          urlInput.focus();
+        };
+        
+        toolbar.appendChild(linkBtn);
+        document.body.appendChild(toolbar);
+        
+        // Close toolbar when clicking outside
+        setTimeout(function(){
+          function closeOnClickOutside(e){
+            if (!toolbar.contains(e.target) && e.target !== span) {
+              toolbar.remove();
+              document.removeEventListener('click', closeOnClickOutside);
+            }
+          }
+          document.addEventListener('click', closeOnClickOutside);
+        }, 100);
+      }
+      
       function stopClick(e){ try{ e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation(); }catch(_){} }
       span.addEventListener('input', onInput);
-      span.addEventListener('click', stopClick);
+      span.addEventListener('click', showToolbar);
       span.addEventListener('dblclick', stopClick);
 
-      teardownFns.push(function(){ try{ span.removeEventListener('input', onInput); span.removeEventListener('click', stopClick); span.removeEventListener('dblclick', stopClick);}catch(e){}; try{ var t=document.createTextNode(span.textContent||''); parent.replaceChild(t, span); }catch(e){} });
+      teardownFns.push(function(){ try{ span.removeEventListener('input', onInput); span.removeEventListener('click', showToolbar); span.removeEventListener('dblclick', stopClick);}catch(e){}; try{ var t=document.createTextNode(span.textContent||''); parent.replaceChild(t, span); }catch(e){} });
     });
 
     // 2) Placeholder editing for input/textarea via dblclick -> prompt
@@ -204,7 +377,15 @@ function injectEditorScript(html: string, edit: boolean) {
       teardownFns.push(function(){ try{ el.removeEventListener('dblclick', onDbl); }catch(e){} });
     });
   }
-  function parent_post(msg){ try { parent.postMessage({ ...msg, edits: Array.from(state.values()) }, '*'); } catch(e){} }
+  function parent_post(msg){ 
+    console.log('DEBUG: Enviando mensagem para parent:', msg);
+    console.log('DEBUG: Edições no state:', Array.from(state.values()));
+    try { 
+      parent.postMessage({ ...msg, edits: Array.from(state.values()) }, '*'); 
+    } catch(e){
+      console.log('DEBUG: Erro ao enviar mensagem:', e);
+    } 
+  }
   function enable(){ enabled = true; teardown(); setup(); }
   function disable(){ enabled = false; teardown(); }
   function teardown(){ while(teardownFns.length){ try{ (teardownFns.pop())(); }catch(e){} } }
