@@ -80,6 +80,20 @@ export const projectsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      // Verificar limite de projetos por usuário
+      const existingProjectsCount = await prisma.project.count({
+        where: {
+          userId: ctx.auth.userId,
+        },
+      });
+
+      if (existingProjectsCount >= 2) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Você já possui 2 projetos. Exclua um projeto existente para criar um novo.",
+        });
+      }
+
       try {
         if (process.env.DISABLE_CREDIT_CHECK !== 'true') {
           await consumeCredits();
@@ -112,7 +126,7 @@ export const projectsRouter = createTRPCRouter({
         },
       });
 
-  const sendResult = await inngest.send({
+      const sendResult = await inngest.send({
         name: "code-agent/run",
         data: {
           value: input.value,
@@ -121,5 +135,37 @@ export const projectsRouter = createTRPCRouter({
         },
       });
       return createdProject;
+    }),
+  delete: protectedProcedure
+    .input(
+      z.object({
+        id: z.string().min(1, { message: "id is required" }),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      // Verificar se o projeto existe e pertence ao usuário
+      const existingProject = await prisma.project.findUnique({
+        where: {
+          id: input.id,
+          userId: ctx.auth.userId,
+        },
+      });
+
+      if (!existingProject) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Projeto não encontrado",
+        });
+      }
+
+      // Excluir o projeto (as mensagens e fragmentos serão excluídos automaticamente devido ao onDelete: Cascade)
+      await prisma.project.delete({
+        where: {
+          id: input.id,
+          userId: ctx.auth.userId,
+        },
+      });
+
+      return { success: true };
     }),
 });

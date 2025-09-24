@@ -2,22 +2,48 @@
 
 import { useState } from "react";
 import { useUser } from "@clerk/nextjs";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import Image from "next/image";
 import Link from "next/link";
+import { Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { DeleteConfirmationModal } from "@/components/ui/delete-confirmation-modal";
 import { useTRPC } from "@/trpc/client";
 
 const ProjectsList = () => {
   const { user } = useUser();
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const { data: projects } = useQuery(trpc.projects.getMany.queryOptions());
 
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(6); // Show 6 projects per page
+  const [deleteModal, setDeleteModal] = useState<{
+    open: boolean;
+    projectId: string;
+    projectName: string;
+  }>({
+    open: false,
+    projectId: "",
+    projectName: "",
+  });
+
+  const deleteProject = useMutation(
+    trpc.projects.delete.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries(trpc.projects.getMany.queryOptions());
+        toast.success("Projeto excluído com sucesso!");
+        setDeleteModal({ open: false, projectId: "", projectName: "" });
+      },
+      onError: (error) => {
+        toast.error(error.message || "Erro ao excluir projeto");
+      },
+    })
+  );
 
   const totalProjects = projects?.length || 0;
   const totalPages = Math.ceil(totalProjects / itemsPerPage);
@@ -38,6 +64,22 @@ const ProjectsList = () => {
   const handleNext = () => {
     if (currentPage < totalPages) {
       setCurrentPage(currentPage + 1);
+    }
+  };
+
+  const handleDeleteClick = (projectId: string, projectName: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDeleteModal({
+      open: true,
+      projectId,
+      projectName,
+    });
+  };
+
+  const handleConfirmDelete = () => {
+    if (deleteModal.projectId) {
+      deleteProject.mutate({ id: deleteModal.projectId });
     }
   };
 
@@ -77,44 +119,69 @@ const ProjectsList = () => {
   };
 
   return (
-    <div className="w-full bg-white dark:bg-sidebar rounded-xl p-8 border flex flex-col gap-y-6 sm:gap-y-4">
-      <h2 className="text-2xl font-semibold">Seus Projetos</h2>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-        {projects?.length === 0 && (
-          <div className="col-span-full text-center">
-            <p className="text-sm text-muted-foreground">Nenhum projeto encontrado</p>
-          </div>
-        )}
-        {currentProjects?.map((project) => (
-          <Button
-            key={project.id}
-            variant="outline"
-            className="font-normal h-auto justify-start w-full text-start p-4"
-            asChild
-          >
-            <Link href={`/projects/${project.id}`}>
-              <div className="flex items-center gap-x-4">
-                <Image
-                  src="/logo.svg"
-                  alt="lovable-clone"
-                  width={32}
-                  height={32}
-                  className="object-contain"
-                />
-                <div className="flex flex-col">
-                  <h3 className="truncate font-medium">{project.name}</h3>
-                  <p className="text-sm text-muted-foreground">
-                    {formatDistanceToNow(project.updatedAt, {
-                      addSuffix: true,
-                      locale: ptBR,
-                    })}
-                  </p>
-                </div>
-              </div>
-            </Link>
-          </Button>
-        ))}
-      </div>
+    <>
+      <div className="w-full bg-white dark:bg-sidebar rounded-xl p-8 border flex flex-col gap-y-6 sm:gap-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-2xl font-semibold">Seus Projetos</h2>
+          {totalProjects >= 1 && (
+            <div className="text-sm text-muted-foreground">
+              {totalProjects}/2 projetos
+              {totalProjects === 2 && (
+                <span className="ml-2 text-amber-600 dark:text-amber-400">
+                  (Limite atingido)
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+          {projects?.length === 0 && (
+            <div className="col-span-full text-center">
+              <p className="text-sm text-muted-foreground">Nenhum projeto encontrado</p>
+            </div>
+          )}
+          {currentProjects?.map((project) => (
+            <div key={project.id} className="relative group">
+              <Button
+                variant="outline"
+                className="font-normal h-auto justify-start w-full text-start p-4"
+                asChild
+              >
+                <Link href={`/projects/${project.id}`}>
+                  <div className="flex items-center gap-x-4">
+                    <Image
+                      src="/logo.svg"
+                      alt="lovable-clone"
+                      width={32}
+                      height={32}
+                      className="object-contain"
+                    />
+                    <div className="flex flex-col">
+                      <h3 className="truncate font-medium">{project.name}</h3>
+                      <p className="text-sm text-muted-foreground">
+                        {formatDistanceToNow(project.updatedAt, {
+                          addSuffix: true,
+                          locale: ptBR,
+                        })}
+                      </p>
+                    </div>
+                  </div>
+                </Link>
+              </Button>
+              
+              {/* Delete button */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 w-8 h-8 p-0 bg-background hover:bg-red-50 hover:border-red-200 dark:hover:bg-red-950/20"
+                onClick={(e) => handleDeleteClick(project.id, project.name, e)}
+                title="Excluir projeto"
+              >
+                <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
+              </Button>
+            </div>
+          ))}
+        </div>
 
       {/* Pagination Controls */}
       {totalPages > 1 && (
@@ -164,7 +231,18 @@ const ProjectsList = () => {
           </div>
         </div>
       )}
-    </div>
+      </div>
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmationModal
+        open={deleteModal.open}
+        onClose={() => setDeleteModal({ open: false, projectId: "", projectName: "" })}
+        onConfirm={handleConfirmDelete}
+        title="Excluir Projeto"
+        description={`Tem certeza que deseja excluir o projeto "${deleteModal.projectName}"? Esta ação não pode ser desfeita.`}
+        isLoading={deleteProject.isPending}
+      />
+    </>
   );
 };
 
