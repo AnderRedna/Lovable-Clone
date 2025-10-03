@@ -125,12 +125,7 @@ const ProjectsList = () => {
           <h2 className="text-2xl font-semibold">Seus Projetos</h2>
           {totalProjects >= 1 && (
             <div className="text-sm text-muted-foreground">
-              {totalProjects}/2 projetos
-              {totalProjects === 2 && (
-                <span className="ml-2 text-amber-600 dark:text-amber-400">
-                  (Limite atingido)
-                </span>
-              )}
+              {totalProjects} projeto{totalProjects === 1 ? '' : 's'}
             </div>
           )}
         </div>

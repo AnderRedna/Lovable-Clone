@@ -58,18 +58,8 @@ const ProjectForm = () => {
           router.push("/pricing");
         }
 
-        // Verificar se é erro de limite de projetos
-        if (error.message.includes("Você já possui 2 projetos")) {
-          toast.error(
-            "Limite de projetos atingido! Você pode ter no máximo 2 projetos. Exclua um projeto existente para criar um novo.",
-            {
-              duration: 6000,
-              position: "top-center",
-            }
-          );
-        } else {
-          toast.error(error.message);
-        }
+        // Removed handling for 2-project limit; show the error message as-is
+        toast.error(error.message);
       },
     })
   );

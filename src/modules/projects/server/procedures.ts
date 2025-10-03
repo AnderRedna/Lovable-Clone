@@ -80,20 +80,6 @@ export const projectsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      // Verificar limite de projetos por usuário
-      const existingProjectsCount = await prisma.project.count({
-        where: {
-          userId: ctx.auth.userId,
-        },
-      });
-
-      if (existingProjectsCount >= 2) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Você já possui 2 projetos. Exclua um projeto existente para criar um novo.",
-        });
-      }
-
       try {
         if (process.env.DISABLE_CREDIT_CHECK !== 'true') {
           await consumeCredits();
